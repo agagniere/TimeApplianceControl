@@ -1,28 +1,39 @@
 const std = @import("std");
+const zon = @import("build.zig.zon");
+const name = @tagName(zon.name);
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
 
-    const mod = b.addModule("ocp_tap_zig", .{
+    const argsParser = b.dependency("args", .{ .target = target, .optimize = optimize });
+
+    const mod = b.addModule(name, .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
     });
 
     const exe = b.addExecutable(.{
-        .name = "ocp_tap_zig",
+        .name = name,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "ocp_tap_zig", .module = mod },
+                .{ .name = "tap", .module = mod },
+                .{ .name = "args", .module = argsParser.module("args") },
             },
         }),
+        .use_llvm = true, // https://github.com/ziglang/zig/issues/24364
     });
-
     b.installArtifact(exe);
 
+    { // Build info
+        const build_info = b.addOptions();
+        build_info.addOption([]const u8, "version", zon.version);
+        build_info.addOption([]const u8, "name", name);
+        exe.root_module.addOptions("build_info", build_info);
+    }
     { // Run
         const run_step = b.step("run", "Run the app");
         const run_cmd = b.addRunArtifact(exe);

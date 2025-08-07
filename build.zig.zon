@@ -1,16 +1,18 @@
 .{
-    .name = .ocp_tap_zig,
+    .name = .tapctl,
     .version = "0.0.0",
-    .fingerprint = 0x616250b1b6776fa4, // Changing this has security and trust implications.
+    .fingerprint = 0xabdaf4ed40b9db3e, // Changing this has security and trust implications.
     .minimum_zig_version = "0.15.0-dev.1425+7ee6dab39",
 
-    .dependencies = .{},
+    .dependencies = .{
+        .args = .{
+            .url = "git+https://github.com/ikskuh/zig-args?ref=master#4c305bcb45fd3c4b74b7bf7f907cf3fc12f415a2",
+            .hash = "args-0.0.0-CiLiquDRAADuU_ueSmGquhHAuhDxxlfBokGj01ZdVYHt",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
-        // For example...
-        //"LICENSE",
-        //"README.md",
     },
 }
