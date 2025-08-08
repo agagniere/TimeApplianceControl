@@ -19,7 +19,7 @@ const CommonOptions = struct {
     };
     pub const meta = .{
         .usage_summary = "[-N NUMBER | -n NAME | -P PATH] [-h] [-v] (mro | info)",
-        .full_text = "Control a Time Appliance from the Open Compute Project's Time Appliance Project",
+        .full_text = "Control a time card from Open Compute Project's Time Appliance Project",
         .option_docs = .{
             .@"ocp-number" = "Specify the number of the appliance, that is then assumed to be at /sys/class/timecard/ocp<N>. Defaults to 0",
             .@"timecard-name" = "Specify the name of the appliance, that is then assumed to be at /sys/class/timecard/<NAME>. Overrides --ocp-number",
@@ -53,18 +53,14 @@ fn log_error(err: argsParser.Error) !void {
     std.log.err("{f}", .{err});
 }
 
-fn get_timecard_dir(options: ParsedArgs) !std.fs.Dir {
+fn get_timecard_path(gpa: std.mem.Allocator, options: ParsedArgs) ![]const u8 {
     if (options.options.@"timecard-path") |path| {
-        return std.fs.openDirAbsolute(path, .{});
+        return gpa.dupe(u8, path);
     }
-    var parent = try std.fs.openDirAbsolute("/sys/class/timecard", .{});
-    defer parent.close();
     if (options.options.@"timecard-name") |name| {
-        return parent.openDir(name, .{});
+        return std.fmt.allocPrint(gpa, "/sys/class/timecard/{s}", .{name});
     }
-    var buffer: [4]u8 = undefined;
-    const name = try std.fmt.bufPrint(&buffer, "ocp{}", .{options.options.@"ocp-number"});
-    return parent.openDir(name, .{});
+    return std.fmt.allocPrint(gpa, "/sys/class/timecard/ocp{}", .{options.options.@"ocp-number"});
 }
 
 pub fn main() !u8 {
@@ -102,12 +98,14 @@ pub fn main() !u8 {
         return 0;
     }
 
-    var timecard_dir = try get_timecard_dir(options);
-    defer timecard_dir.close();
-    const timecard_path = try timecard_dir.realpathAlloc(gpa, ".");
+    const timecard_path = try get_timecard_path(gpa, options);
     defer gpa.free(timecard_path);
-
     std.log.info("Starting {s} version {s}, with timecard at {s}", .{ build_info.name, build_info.version, timecard_path });
+
+    var timecard_dir = try std.fs.openDirAbsolute(timecard_path, .{});
+    defer timecard_dir.close();
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    std.log.debug("Timecard resolved to {s}", .{try timecard_dir.realpath(".", &buffer)});
 
     return 0;
 }
