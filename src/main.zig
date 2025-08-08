@@ -57,12 +57,14 @@ fn get_timecard_dir(options: ParsedArgs) !std.fs.Dir {
     if (options.options.@"timecard-path") |path| {
         return std.fs.openDirAbsolute(path, .{});
     }
+    var parent = try std.fs.openDirAbsolute("/sys/class/timecard", .{});
+    defer parent.close();
     if (options.options.@"timecard-name") |name| {
-        var parent = try std.fs.openDirAbsolute("/sys/class/timecard", .{});
-        defer parent.close();
         return parent.openDir(name, .{});
     }
-    return std.fs.openDirAbsolute("/sys/class/timecard/ocp0", .{});
+    var buffer: [4]u8 = undefined;
+    const name = try std.fmt.bufPrint(&buffer, "ocp{}", .{options.options.@"ocp-number"});
+    return parent.openDir(name, .{});
 }
 
 pub fn main() !u8 {
