@@ -2,6 +2,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const build_info = @import("build_info");
 const argsParser = @import("args");
+const tap = @import("tap");
+
+const Timecard = tap.Timecard;
 
 const CommonOptions = struct {
     @"ocp-number": u8 = 0,
@@ -102,10 +105,10 @@ pub fn main() !u8 {
     defer gpa.free(timecard_path);
     std.log.info("Starting {s} version {s}, with timecard at {s}", .{ build_info.name, build_info.version, timecard_path });
 
-    var timecard_dir = try std.fs.openDirAbsolute(timecard_path, .{});
-    defer timecard_dir.close();
-    var buffer: [std.fs.max_path_bytes]u8 = undefined;
-    std.log.debug("Timecard resolved to {s}", .{try timecard_dir.realpath(".", &buffer)});
+    var timecard: Timecard = try .fromPath(timecard_path);
+    defer timecard.close();
+
+    try output.print("---\n{f}\n", .{std.json.fmt(timecard, .{})});
 
     return 0;
 }
