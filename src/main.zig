@@ -105,10 +105,13 @@ pub fn main() !u8 {
     defer gpa.free(timecard_path);
     std.log.info("Starting {s} version {s}, with timecard at {s}", .{ build_info.name, build_info.version, timecard_path });
 
-    var timecard: Timecard = try .fromPath(timecard_path);
-    defer timecard.close();
+    var timecard: Timecard = try .fromPath(gpa, timecard_path);
+    defer timecard.deinit();
 
-    try output.print("---\n{f}\n", .{std.json.fmt(timecard, .{})});
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+    const json = try timecard.to_json(arena.allocator());
+    try output.print("---\n{f}\n", .{std.json.fmt(json, .{})});
 
     return 0;
 }
