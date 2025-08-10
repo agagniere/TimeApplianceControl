@@ -4,9 +4,11 @@ const readSerialNumber = @import("serialnumber.zig").readSerialNumber;
 
 const Allocator = std.mem.Allocator;
 const NameMap = std.StringArrayHashMapUnmanaged([]const u8);
+const assert = std.debug.assert;
 
 const log = std.log.scoped(.timecard);
 
+/// Iterate through the tty folder a read each attribute
 fn getSerialPortsName(gpa: Allocator, root: std.fs.Dir) !NameMap {
     var result: NameMap = .empty;
     const tty_dir = root.openDir("tty", .{ .iterate = true }) catch |err| {
@@ -21,13 +23,14 @@ fn getSerialPortsName(gpa: Allocator, root: std.fs.Dir) !NameMap {
     var buffer: [32]u8 = undefined;
     var ttys = tty_dir.iterate();
     while (try ttys.next()) |tty_file| {
-        std.debug.assert(std.mem.startsWith(u8, tty_file.name, "tty"));
-        std.debug.assert(tty_file.kind == .file);
+        assert(std.mem.startsWith(u8, tty_file.name, "tty"));
+        assert(tty_file.kind == .file);
         try result.put(gpa, tty_file.name[3..], try tty_dir.readFile(tty_file.name, &buffer));
     }
     return result;
 }
 
+/// Time Appliance handle
 pub const Timecard = struct {
     allocator: Allocator,
     root: std.fs.Dir,

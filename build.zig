@@ -52,4 +52,17 @@ pub fn build(b: *std.Build) void {
         test_step.dependOn(&run_mod_tests.step);
         //test_step.dependOn(&run_exe_tests.step);
     }
+    { // Documentation
+        const docs_step = b.step("docs", "Build the project documentation");
+        const docs_obj = b.addObject(.{
+            .name = name,
+            .root_module = mod,
+        });
+        const install_docs = b.addInstallDirectory(.{
+            .source_dir = docs_obj.getEmittedDocs(),
+            .install_dir = .prefix,
+            .install_subdir = "docs",
+        });
+        docs_step.dependOn(&install_docs.step);
+    }
 }
