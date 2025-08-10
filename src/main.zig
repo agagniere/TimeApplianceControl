@@ -3,8 +3,29 @@ const builtin = @import("builtin");
 const build_info = @import("build_info");
 const argsParser = @import("args");
 const tap = @import("tap");
+const axe = @import("axe");
 
 const Timecard = tap.Timecard;
+
+pub const axe_log = axe.Axe(.{
+    .format = "[%l%s%L] %m\n",
+    .scope_format = " %",
+    .loc_format = " %f:%F:%l",
+    .level_text = .{
+        .debug = "DEBUG",
+        .info = "INFO ",
+        .warn = "WARN ",
+        .err = "ERROR",
+    },
+    .styles = .{
+        .debug = &.{.dim},
+    },
+});
+
+pub const std_options: std.Options = .{
+    .logFn = axe_log.log,
+    .log_level = .debug,
+};
 
 const CommonOptions = struct {
     @"ocp-number": u8 = 0,
@@ -74,6 +95,11 @@ pub fn main() !u8 {
         .Debug, .ReleaseSafe => debug_allocator.allocator(),
         .ReleaseFast, .ReleaseSmall => std.heap.smp_allocator,
     };
+
+    // Env & logs
+    var env = try std.process.getEnvMap(gpa);
+    defer env.deinit();
+    try axe_log.init(gpa, null, &env);
 
     // Output stream
     const out_buffer: []u8 = try gpa.alloc(u8, 4096);

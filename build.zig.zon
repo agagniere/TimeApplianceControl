@@ -9,6 +9,10 @@
             .url = "git+https://github.com/ikskuh/zig-args?ref=master#49d7f38698e0a8362fb57c44fc2d38b359809d22",
             .hash = "args-0.0.0-CiLiqlLSAAApbJcExQNqTNylC1IZrj6AEIRbbrvGH1vc",
         },
+        .axe = .{
+            .url = "git+https://github.com/agagniere/axe?ref=master#ee00d9d2febaf2545379c2b078e7c50b5a0fd5a0",
+            .hash = "axe-0.7.0-M2JU5TmGAABMK_IXZhpP4cr30KxTRh0cBNtDgW8FABRT",
+        },
     },
     .paths = .{
         "build.zig",

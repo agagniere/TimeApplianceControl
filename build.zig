@@ -7,6 +7,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
 
     const argsParser = b.dependency("args", .{ .target = target, .optimize = optimize });
+    const axe = b.dependency("axe", .{ .target = target, .optimize = optimize });
 
     const mod = b.addModule(name, .{
         .root_source_file = b.path("src/root.zig"),
@@ -23,6 +24,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "tap", .module = mod },
                 .{ .name = "args", .module = argsParser.module("args") },
+                .{ .name = "axe", .module = axe.module("axe") },
             },
         }),
         .use_llvm = true, // https://github.com/ziglang/zig/issues/24364
