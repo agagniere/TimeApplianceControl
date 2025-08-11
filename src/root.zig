@@ -1,29 +1,13 @@
 const std = @import("std");
 
 const readSerialNumber = @import("serialnumber.zig").readSerialNumber;
+const PciInfo = @import("pci.zig").PciInfo;
 
 const Allocator = std.mem.Allocator;
 const NameMap = std.StringArrayHashMapUnmanaged([]const u8);
 const assert = std.debug.assert;
 
 const log = std.log.scoped(.timecard);
-
-const Vendor = enum {
-    Facebook,
-    Celestica,
-    Orolia,
-    Adva,
-
-    fn fromID(id: u16) ?@This() {
-        return switch (id) {
-            0x1d9b => .Facebook,
-            0x18d4 => .Celestica,
-            0x1ad7 => .Orolia,
-            0xad5a => .Adva,
-            else => null,
-        };
-    }
-};
 
 /// Iterate through the tty folder a read each attribute
 fn getSerialPortsName(gpa: Allocator, root: std.fs.Dir) !NameMap {
@@ -58,43 +42,6 @@ fn getPtpName(gpa: Allocator, root: std.fs.Dir) ![]const u8 {
     }
     return gpa.dupe(u8, std.fs.path.basename(relative));
 }
-
-fn readFileInteger(T: type, dir: std.fs.Dir, filename: []const u8) !T {
-    var buffer: [64]u8 = undefined;
-    const content = std.mem.trim(u8, try dir.readFile(filename, &buffer), "\n");
-    log.debug("{s}: {s}", .{ filename, content });
-    return try std.fmt.parseInt(T, content, 0);
-}
-
-const Device = enum {
-    /// Facebook and Adva use the same device ID
-    Timecard,
-    @"Celestica Timecard",
-    @"ART Card",
-
-    fn fromID(id: u16) ?@This() {
-        return switch (id) {
-            0x0400 => .Timecard,
-            0x1008 => .@"Celestica Timecard",
-            0xa000 => .@"ART Card",
-            else => null,
-        };
-    }
-};
-
-const PciInfo = struct {
-    vendor: ?Vendor,
-    device: ?Device,
-    revision: u8,
-
-    fn fromDir(dir: std.fs.Dir) !@This() {
-        return .{
-            .vendor = .fromID(try readFileInteger(u16, dir, "vendor")),
-            .device = .fromID(try readFileInteger(u16, dir, "device")),
-            .revision = try readFileInteger(u8, dir, "revision"),
-        };
-    }
-};
 
 /// Time Appliance handle
 pub const Timecard = struct {
