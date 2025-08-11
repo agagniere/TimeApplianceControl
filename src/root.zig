@@ -8,6 +8,23 @@ const assert = std.debug.assert;
 
 const log = std.log.scoped(.timecard);
 
+const Vendor = enum {
+    Facebook,
+    Celestica,
+    Orolia,
+    Adva,
+
+    fn fromID(id: u16) ?@This() {
+        return switch (id) {
+            0x1d9b => .Facebook,
+            0x18d4 => .Celestica,
+            0x1ad7 => .Orolia,
+            0xad5a => .Adva,
+            else => null,
+        };
+    }
+};
+
 /// Iterate through the tty folder a read each attribute
 fn getSerialPortsName(gpa: Allocator, root: std.fs.Dir) !NameMap {
     var result: NameMap = .empty;
@@ -35,16 +52,59 @@ fn getSerialPortsName(gpa: Allocator, root: std.fs.Dir) !NameMap {
 fn getPtpName(gpa: Allocator, root: std.fs.Dir) ![]const u8 {
     var buffer: [64]u8 = undefined;
     const relative = try root.readLink("ptp", &buffer);
+    if (comptime std.log.logEnabled(.debug, .timecard)) {
+        var absolute_buffer: [std.fs.max_path_bytes]u8 = undefined;
+        log.debug("This card exposes PTP clock {s}", .{try root.realpath(relative, &absolute_buffer)});
+    }
     return gpa.dupe(u8, std.fs.path.basename(relative));
 }
+
+fn readFileInteger(T: type, dir: std.fs.Dir, filename: []const u8) !T {
+    var buffer: [64]u8 = undefined;
+    const content = std.mem.trim(u8, try dir.readFile(filename, &buffer), "\n");
+    log.debug("{s}: {s}", .{ filename, content });
+    return try std.fmt.parseInt(T, content, 0);
+}
+
+const Device = enum {
+    /// Facebook and Adva use the same device ID
+    Timecard,
+    @"Celestica Timecard",
+    @"ART Card",
+
+    fn fromID(id: u16) ?@This() {
+        return switch (id) {
+            0x0400 => .Timecard,
+            0x1008 => .@"Celestica Timecard",
+            0xa000 => .@"ART Card",
+            else => null,
+        };
+    }
+};
+
+const PciInfo = struct {
+    vendor: ?Vendor,
+    device: ?Device,
+    revision: u8,
+
+    fn fromDir(dir: std.fs.Dir) !@This() {
+        return .{
+            .vendor = .fromID(try readFileInteger(u16, dir, "vendor")),
+            .device = .fromID(try readFileInteger(u16, dir, "device")),
+            .revision = try readFileInteger(u8, dir, "revision"),
+        };
+    }
+};
 
 /// Time Appliance handle
 pub const Timecard = struct {
     allocator: Allocator,
     root: std.fs.Dir,
+    pci_device: std.fs.Dir,
     serialnumber: u32,
     serial_ports_name: NameMap,
     ptp_name: []const u8,
+    pci_info: PciInfo,
 
     const Self = @This();
 
@@ -58,12 +118,15 @@ pub const Timecard = struct {
     }
 
     fn fromDir(gpa: Allocator, dir: std.fs.Dir) !Self {
+        const pci_device = try dir.openDir("device", .{});
         return .{
             .allocator = gpa,
             .root = dir,
+            .pci_device = pci_device,
             .serialnumber = try readSerialNumber(dir),
             .serial_ports_name = try getSerialPortsName(gpa, dir),
             .ptp_name = try getPtpName(gpa, dir),
+            .pci_info = try .fromDir(pci_device),
         };
     }
 
@@ -73,6 +136,7 @@ pub const Timecard = struct {
             self.allocator.free(tty.key_ptr.*);
             self.allocator.free(tty.value_ptr.*);
         }
+        self.pci_device.close();
         self.root.close();
         self.serial_ports_name.deinit(self.allocator);
         self.allocator.free(self.ptp_name);
@@ -99,6 +163,13 @@ pub const Timecard = struct {
             var ptp: std.json.ObjectMap = .init(arena);
             try ptp.put("name", .{ .string = self.ptp_name });
             try top.put("ptp", .{ .object = ptp });
+        }
+        {
+            var pci: std.json.ObjectMap = .init(arena);
+            try pci.put("vendor", if (self.pci_info.vendor) |vendor| .{ .string = @tagName(vendor) } else .null);
+            try pci.put("device", if (self.pci_info.device) |device| .{ .string = @tagName(device) } else .null);
+            try pci.put("revision", .{ .integer = self.pci_info.revision });
+            try top.put("pci", .{ .object = pci });
         }
         return .{ .object = top };
     }
