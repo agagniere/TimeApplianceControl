@@ -33,13 +33,25 @@ fn getSerialPortsName(gpa: Allocator, root: std.fs.Dir) !NameMap {
 }
 
 /// Return the name of the ptp clock exposed by this card
-fn getPtpName(gpa: Allocator, root: std.fs.Dir, card_name: []const u8) ![]const u8 {
+fn getPtpName(gpa: Allocator, root: std.fs.Dir) ![]const u8 {
     var buffer: [64]u8 = undefined;
     const relative = try root.readLink("ptp", &buffer);
     const name = std.fs.path.basename(relative);
-    log.info("Card {s} exposes the PTP clock {s}", .{ card_name, name });
     return gpa.dupe(u8, name);
 }
+
+const linux = @cImport({
+    @cInclude("linux/ptp_clock.h");
+});
+
+/// Hmmmmmmmmmmm
+/// https://elixir.bootlin.com/linux/v6.14.11/source/tools/testing/selftests/ptp/testptp.c#L89
+fn getClockID(fd: std.posix.fd_t) std.posix.clockid_t {
+    const hmm: u32 = @intCast(fd);
+    return @enumFromInt((~hmm << 3) | 3);
+}
+
+//pub const PtpInfo = struct {};
 
 /// Time Appliance handle
 pub const Timecard = struct {
@@ -66,7 +78,22 @@ pub const Timecard = struct {
             log.debug("Card {s} is part of the PCI device {s}", .{ name, try pci_device.realpath(".", &buffer) });
         }
         const pci_info: PciInfo = try .fromDir(gpa, pci_device);
-        log.debug("Card {s} detected as {t} {t} rev. {}, PCI x{}", .{ name, pci_info.vendor.?, pci_info.device.?, pci_info.revision, pci_info.max_width });
+        log.info("Card {s} detected as {t} {t} rev. {}, PCI x{}", .{ name, pci_info.vendor.?, pci_info.device.?, pci_info.revision, pci_info.max_width });
+        //const ptp_fs = try dir.openDir("ptp", .{});
+        //defer ptp_fs.close();
+        const ptp_name = try getPtpName(gpa, dir);
+        log.info("Card {s} exposes the PTP clock {s}", .{ name, ptp_name });
+        var dev = try std.fs.openDirAbsolute("/dev", .{});
+        defer dev.close();
+        var ptp = try dev.openFile(ptp_name, .{});
+        defer ptp.close();
+        const clock = getClockID(ptp.handle);
+        log.debug("fd: {} => clockid: {}", .{ ptp.handle, clock });
+        var caps: linux.struct_ptp_clock_caps = undefined;
+
+        const a: u32 = @truncate(linux.PTP_CLOCK_GETCAPS);
+        assert(std.c.ioctl(ptp.handle, @bitCast(a), &caps) == 0);
+        log.info("{any}", .{caps});
         return .{
             .allocator = gpa,
             .name = try gpa.dupe(u8, name),
@@ -74,7 +101,7 @@ pub const Timecard = struct {
             .pci_device = pci_device,
             .serialnumber = try readSerialNumber(dir),
             .serial_ports_name = try getSerialPortsName(gpa, dir),
-            .ptp_name = try getPtpName(gpa, dir, name),
+            .ptp_name = ptp_name,
             .pci_info = pci_info,
         };
     }
