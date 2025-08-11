@@ -1,7 +1,5 @@
 const std = @import("std");
 
-const log = std.log.scoped(.timecard);
-
 const Vendor = enum {
     Facebook,
     Celestica,
@@ -42,17 +40,25 @@ fn readFileInteger(T: type, dir: std.fs.Dir, filename: []const u8) !T {
     return try std.fmt.parseInt(T, content, 0);
 }
 
-/// Info exposed
+/// Info exposed by the sysfs about the PCI device
 pub const PciInfo = struct {
     vendor: ?Vendor,
     device: ?Device,
     revision: u8,
+    max_speed: []const u8,
+    max_width: u8,
 
-    pub fn fromDir(dir: std.fs.Dir) !@This() {
+    pub fn fromDir(gpa: std.mem.Allocator, dir: std.fs.Dir) !@This() {
         return .{
             .vendor = .fromID(try readFileInteger(u16, dir, "vendor")),
             .device = .fromID(try readFileInteger(u16, dir, "device")),
             .revision = try readFileInteger(u8, dir, "revision"),
+            .max_width = try readFileInteger(u8, dir, "max_link_width"),
+            .max_speed = try dir.readFileAlloc(gpa, "max_link_speed", 64),
         };
+    }
+
+    pub fn deinit(self: *@This(), gpa: std.mem.Allocator) void {
+        gpa.free(self.max_speed);
     }
 };
