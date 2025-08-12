@@ -17,6 +17,8 @@ fn getClockID(fd: std.posix.fd_t) std.posix.clockid_t {
 const clock_getcaps: u32 = @truncate(linux.PTP_CLOCK_GETCAPS);
 const pin_getfunc: u32 = @truncate(linux.PTP_PIN_GETFUNC);
 
+pub const pin_function_string = [_][]const u8{ "None", "ExternalTimeStamp", "PeriodicOutput", "PhysicalSynchronization" };
+
 /// Collect info about the ptp clock
 /// from the sysfs and from IOCTLs
 pub const PtpInfo = struct {

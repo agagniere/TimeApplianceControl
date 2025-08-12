@@ -2,7 +2,8 @@ const std = @import("std");
 
 const readSerialNumber = @import("serialnumber.zig").readSerialNumber;
 pub const PciInfo = @import("pci.zig").PciInfo;
-pub const PtpInfo = @import("ptp.zig").PtpInfo;
+const _ptp = @import("ptp.zig");
+pub const PtpInfo = _ptp.PtpInfo;
 
 const Allocator = std.mem.Allocator;
 const NameMap = std.StringArrayHashMapUnmanaged([]const u8);
@@ -123,6 +124,8 @@ pub const Timecard = struct {
             for (self.ptp_info.pins) |pin| {
                 var obj: std.json.ObjectMap = .init(arena);
                 try obj.put("name", .{ .string = pin.name[0..std.mem.indexOfScalar(u8, pin.name[0..64], 0).?] });
+                try obj.put("function", .{ .string = _ptp.pin_function_string[pin.func] });
+                try obj.put("channel", .{ .integer = pin.chan });
                 try pins.append(.{ .object = obj });
             }
             try ptp.put("name", .{ .string = self.ptp_info.name });
