@@ -38,7 +38,7 @@ fn getSerialPortsName(gpa: Allocator, root: std.fs.Dir) !NameMap {
 pub const Timecard = struct {
     allocator: Allocator,
     name: []const u8,
-    serialnumber: u32,
+    serialnumber: ?u32,
     serial_ports_name: NameMap,
     pci_info: PciInfo,
     ptp_info: PtpInfo,
@@ -71,7 +71,10 @@ pub const Timecard = struct {
         return .{
             .allocator = gpa,
             .name = try gpa.dupe(u8, name),
-            .serialnumber = try readSerialNumber(dir),
+            .serialnumber = readSerialNumber(dir) catch |err| blk: {
+                log.err("Unable to read serial number: {}", .{err});
+                break :blk null;
+            },
             .serial_ports_name = try getSerialPortsName(gpa, dir),
             .pci_info = pci_info,
             .ptp_info = ptp_info,
@@ -96,7 +99,9 @@ pub const Timecard = struct {
         try top.ensureTotalCapacity(8);
         {
             var card: std.json.ObjectMap = .init(arena);
-            try card.put("serial_number", .{ .integer = self.serialnumber });
+            if (self.serialnumber) |num| {
+                try card.put("serial_number", .{ .integer = num });
+            }
             try card.put("name", .{ .string = self.name });
             try top.put("card", .{ .object = card });
         }
@@ -122,8 +127,9 @@ pub const Timecard = struct {
             try caps.put("cross_timestamping", .{ .bool = (self.ptp_info.capabilities.cross_timestamping != 0) });
             try caps.put("phase_adjustment", .{ .bool = (self.ptp_info.capabilities.adjust_phase != 0) });
             for (self.ptp_info.pins) |pin| {
+                const name: [*:0]const u8 = pin.name[0..(pin.name.len - 1) :0];
                 var obj: std.json.ObjectMap = .init(arena);
-                try obj.put("name", .{ .string = pin.name[0..std.mem.indexOfScalar(u8, pin.name[0..64], 0).?] });
+                try obj.put("name", .{ .string = try arena.dupe(u8, std.mem.span(name)) });
                 try obj.put("function", .{ .string = _ptp.pin_function_string[pin.func] });
                 try obj.put("channel", .{ .integer = pin.chan });
                 try pins.append(.{ .object = obj });
