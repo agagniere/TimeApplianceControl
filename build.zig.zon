@@ -2,7 +2,7 @@
     .name = .tapctl,
     .version = "0.0.0",
     .fingerprint = 0xabdaf4ed40b9db3e, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.15.0-dev.1425+7ee6dab39",
+    .minimum_zig_version = "0.15.0-dev.1380+e98aeeb73",
 
     .dependencies = .{
         .args = .{
