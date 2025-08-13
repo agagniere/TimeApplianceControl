@@ -24,9 +24,22 @@ Using [yq](https://github.com/mikefarah/yq) to make the JSON output human-readab
 [DEBUG timecard] Card ocp0 is part of the PCI device /sys/devices/pci0000:00/0000:00:01.0/0000:01:00.0
 [INFO  timecard] Card ocp0 detected as Facebook Timecard rev. 0, PCI x1
 [INFO  timecard] Card ocp0 exposes PTP clock ptp1
-[ERROR timecard root.zig:fromDir:82] Unable to read serial number: error.InvalidCharacter
+[ERROR timecard root.zig:fromDir:135] Unable to read serial number of ocp0: InvalidCharacter
 card:
   name: ocp0
+  connectors:
+    - name: sma4
+      way: output
+      current: PHC
+    - name: sma2
+      way: input
+      current: PPS1
+    - name: sma3
+      way: output
+      current: 10Mhz
+    - name: sma1
+      way: input
+      current: 10Mhz
 serial_ports:
   GNSS: ttyS4
   NMEA: ttyS7
@@ -82,6 +95,19 @@ Note how the parsing of the serial number failed because it was garbage
 card:
   serial_number: 210345
   name: ocp1
+  connectors:
+    - name: sma4
+      way: output
+      current: PHC
+    - name: sma2
+      way: input
+      current: PPS1
+    - name: sma3
+      way: output
+      current: GNSS
+    - name: sma1
+      way: output
+      current: 10Mhz
 serial_ports:
   GNSS: ttyS8
   MAC: ttyS9

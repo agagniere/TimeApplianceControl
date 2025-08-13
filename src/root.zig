@@ -35,6 +35,56 @@ fn getSerialPortsName(gpa: Allocator, root: std.fs.Dir) !NameMap {
     return result;
 }
 
+const Connector = struct {
+    name: []const u8,
+    way: Way,
+    value: []const u8,
+
+    pub const Way = enum { input, output };
+
+    pub fn fromFile(alloc: Allocator, parent: std.fs.Dir, filename: []const u8) !@This() {
+        var buffer: [32]u8 = undefined;
+        const content = try parent.readFile(filename, &buffer);
+        const comma = std.mem.indexOfScalar(u8, content, ':');
+        const way: ?Way = blk: {
+            if (comma) |c| {
+                if (std.mem.eql(u8, content[0..c], "IN"))
+                    break :blk .input;
+                if (std.mem.eql(u8, content[0..c], "OUT"))
+                    break :blk .output;
+            }
+            break :blk null;
+        };
+
+        if (comma == null or way == null) {
+            log.errAt(@src(), "Expected attribute '{s}' to be of the form '(IN|OUT): <format>', got instead: '{s}'", .{ filename, content });
+            return error.InvalidFormat;
+        }
+
+        return .{
+            .name = try alloc.dupe(u8, filename),
+            .way = way.?,
+            .value = try alloc.dupe(u8, std.mem.trim(u8, content[(comma.? + 1)..], " \n")),
+        };
+    }
+
+    pub fn deinit(self: *@This(), gpa: Allocator) void {
+        gpa.free(self.name);
+        gpa.free(self.value);
+    }
+};
+
+fn findConnectors(alloc: Allocator, dir: std.fs.Dir) ![]Connector {
+    var result: std.ArrayListUnmanaged(Connector) = .empty;
+    var files = dir.iterate();
+    while (try files.next()) |file| {
+        if (std.mem.startsWith(u8, file.name, "sma")) {
+            try result.append(alloc, try .fromFile(alloc, dir, file.name));
+        }
+    }
+    return result.toOwnedSlice(alloc);
+}
+
 /// Time Appliance handle
 pub const Timecard = struct {
     allocator: Allocator,
@@ -43,11 +93,12 @@ pub const Timecard = struct {
     serial_ports_name: NameMap,
     pci_info: PciInfo,
     ptp_info: PtpInfo,
+    ios: []Connector,
 
     const Self = @This();
 
     pub fn fromPath(gpa: Allocator, path: []const u8) !Self {
-        var dir = try std.fs.openDirAbsolute(path, .{});
+        var dir = try std.fs.openDirAbsolute(path, .{ .iterate = true });
         defer dir.close();
         return fromDir(gpa, std.fs.path.basename(path), dir);
     }
@@ -79,12 +130,13 @@ pub const Timecard = struct {
             .allocator = gpa,
             .name = owned_name,
             .serialnumber = readSerialNumber(dir) catch |err| blk: {
-                log.errAt(@src(), "Unable to read serial number: {}", .{err});
+                log.errAt(@src(), "Unable to read serial number of {s}: {t}", .{ name, err });
                 break :blk null;
             },
             .serial_ports_name = try getSerialPortsName(gpa, dir),
             .pci_info = pci_info,
             .ptp_info = ptp_info,
+            .ios = try findConnectors(gpa, dir),
         };
     }
 
@@ -99,6 +151,11 @@ pub const Timecard = struct {
             self.allocator.free(tty.value_ptr.*);
         }
         self.serial_ports_name.deinit(self.allocator);
+
+        for (self.ios) |*io| {
+            io.deinit(self.allocator);
+        }
+        self.allocator.free(self.ios);
     }
 
     pub fn to_json(self: Self, arena: Allocator) !std.json.Value {
@@ -110,6 +167,17 @@ pub const Timecard = struct {
                 try card.put("serial_number", .{ .integer = num });
             }
             try card.put("name", .{ .string = self.name });
+            {
+                var smas: std.json.Array = .init(arena);
+                for (self.ios) |io| {
+                    var sma: std.json.ObjectMap = .init(arena);
+                    try sma.put("name", .{ .string = io.name });
+                    try sma.put("way", .{ .string = try std.fmt.allocPrint(arena, "{t}", .{io.way}) });
+                    try sma.put("current", .{ .string = io.value });
+                    try smas.append(.{ .object = sma });
+                }
+                try card.put("connectors", .{ .array = smas });
+            }
             try top.put("card", .{ .object = card });
         }
         {
