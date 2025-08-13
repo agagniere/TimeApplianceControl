@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = @import("log.zig").config.scoped(.timecard);
 
 const Vendor = enum {
     Facebook,
@@ -36,8 +37,14 @@ const Device = enum {
 /// Interpret the contents of the file as an integer
 fn readFileInteger(T: type, dir: std.fs.Dir, filename: []const u8) !T {
     var buffer: [64]u8 = undefined;
-    const content = std.mem.trim(u8, try dir.readFile(filename, &buffer), "\n");
-    return try std.fmt.parseInt(T, content, 0);
+    const content = dir.readFile(filename, &buffer) catch |err| {
+        log.errAt(@src(), "PCI sysfs is expected to contain a file called '{s}': {t}", .{ filename, err });
+        return err;
+    };
+    return std.fmt.parseInt(T, std.mem.trim(u8, content, "\n"), 0) catch |err| {
+        log.errAt(@src(), "The file '{s}' in PCI sysfs is expected to contain an integer: {t}", .{ filename, err });
+        return err;
+    };
 }
 
 /// Info exposed by the sysfs about the PCI device

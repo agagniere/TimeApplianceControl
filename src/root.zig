@@ -12,7 +12,7 @@ const Allocator = std.mem.Allocator;
 const NameMap = std.StringArrayHashMapUnmanaged([]const u8);
 const assert = std.debug.assert;
 
-/// Iterate through the tty folder a read each attribute
+/// Iterate through the tty folder and read each attribute
 fn getSerialPortsName(gpa: Allocator, root: std.fs.Dir) !NameMap {
     var result: NameMap = .empty;
     var tty_dir = root.openDir("tty", .{ .iterate = true }) catch |err| {
@@ -53,7 +53,10 @@ pub const Timecard = struct {
     }
 
     fn fromDir(gpa: Allocator, name: []const u8, dir: std.fs.Dir) !Self {
-        var pci_device = try dir.openDir("device", .{});
+        var pci_device = dir.openDir("device", .{}) catch |err| {
+            log.errAt(@src(), "Expected a 'device' folder in the sysfs of {s}: {t}", .{ name, err });
+            return err;
+        };
         defer pci_device.close();
         if (comptime std.log.logEnabled(.debug, .timecard)) {
             var buffer: [std.fs.max_path_bytes]u8 = undefined;
@@ -69,9 +72,12 @@ pub const Timecard = struct {
         errdefer ptp_info.deinit(gpa);
         log.info("Card {s} exposes PTP clock {s}", .{ name, ptp_info.name });
 
+        const owned_name = try gpa.dupe(u8, name);
+        errdefer gpa.free(owned_name);
+
         return .{
             .allocator = gpa,
-            .name = try gpa.dupe(u8, name),
+            .name = owned_name,
             .serialnumber = readSerialNumber(dir) catch |err| blk: {
                 log.errAt(@src(), "Unable to read serial number: {}", .{err});
                 break :blk null;

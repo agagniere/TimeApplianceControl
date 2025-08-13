@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const Allocator = std.mem.Allocator;
-const log = std.log.scoped(.timecard);
+const log = @import("log.zig").config.scoped(.timecard);
 
 const linux = @cImport({
     @cInclude("linux/ptp_clock.h");
@@ -29,14 +29,17 @@ pub const PtpInfo = struct {
     const Self = @This();
 
     pub fn init(alloc: Allocator, timecard_root: std.fs.Dir) !Self {
-        var dir = try timecard_root.openDir("ptp", .{});
+        var dir = timecard_root.openDir("ptp", .{}) catch |err| {
+            log.errAt(@src(), "Timecard sysfs expected to have a folder called 'ptp': {t}", .{err});
+            return err;
+        };
         defer dir.close();
         var buffer: [std.fs.max_path_bytes]u8 = undefined;
         const name = std.fs.path.basename(try dir.realpath(".", &buffer));
         var dev = try std.fs.openDirAbsolute("/dev", .{});
         defer dev.close();
         var ptp_device = dev.openFile(name, .{}) catch |err| {
-            log.err("Error opening /dev/{s}: {t}", .{ name, err });
+            log.errAt(@src(), "Error opening /dev/{s}: {t}", .{ name, err });
             return err;
         };
         defer ptp_device.close();
