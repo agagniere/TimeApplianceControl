@@ -4,12 +4,13 @@ const readSerialNumber = @import("serialnumber.zig").readSerialNumber;
 pub const PciInfo = @import("pci.zig").PciInfo;
 const _ptp = @import("ptp.zig");
 pub const PtpInfo = _ptp.PtpInfo;
+pub const Log = @import("log.zig").config;
+
+const log = Log.scoped(.timecard);
 
 const Allocator = std.mem.Allocator;
 const NameMap = std.StringArrayHashMapUnmanaged([]const u8);
 const assert = std.debug.assert;
-
-const log = std.log.scoped(.timecard);
 
 /// Iterate through the tty folder a read each attribute
 fn getSerialPortsName(gpa: Allocator, root: std.fs.Dir) !NameMap {
@@ -17,7 +18,7 @@ fn getSerialPortsName(gpa: Allocator, root: std.fs.Dir) !NameMap {
     var tty_dir = root.openDir("tty", .{ .iterate = true }) catch |err| {
         switch (err) {
             error.FileNotFound => {
-                std.log.err("This program only supports linux 6.9 and newer, where the driver groups the ttys read-only attributes in a folder", .{});
+                log.errAt(@src(), "This program only supports linux 6.9 and newer, where the driver groups the ttys read-only attributes in a folder", .{});
             },
             else => {},
         }
@@ -72,7 +73,7 @@ pub const Timecard = struct {
             .allocator = gpa,
             .name = try gpa.dupe(u8, name),
             .serialnumber = readSerialNumber(dir) catch |err| blk: {
-                log.err("Unable to read serial number: {}", .{err});
+                log.errAt(@src(), "Unable to read serial number: {}", .{err});
                 break :blk null;
             },
             .serial_ports_name = try getSerialPortsName(gpa, dir),

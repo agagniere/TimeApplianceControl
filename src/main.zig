@@ -1,29 +1,15 @@
 const std = @import("std");
-const builtin = @import("builtin");
-const build_info = @import("build_info");
 const argsParser = @import("args");
 const tap = @import("tap");
-const axe = @import("axe");
 
+const builtin = @import("builtin");
+const build_info = @import("build_info");
+
+const log = tap.Log;
 const Timecard = tap.Timecard;
 
-pub const axe_log = axe.Axe(.{
-    .format = "[%l%s%L] %m\n",
-    .scope_format = " %",
-    .loc_format = " %f:%F:%l",
-    .level_text = .{
-        .debug = "DEBUG",
-        .info = "INFO ",
-        .warn = "WARN ",
-        .err = "ERROR",
-    },
-    .styles = .{
-        .debug = &.{.dim},
-    },
-});
-
 pub const std_options: std.Options = .{
-    .logFn = axe_log.log,
+    .logFn = log.log,
     .log_level = .debug,
 };
 
@@ -47,8 +33,9 @@ const CommonOptions = struct {
         \\Control a time card from Open Compute Project's Time Appliance Project
         \\
         \\Commands:
-    ++ "\n  info  " ++ InfoOptions.meta.full_text ++
-    ++ "\n  mro   " ++ MroOptions.meta.full_text,
+    ++
+        "\n  info  " ++ InfoOptions.meta.full_text ++
+        "\n  mro   " ++ MroOptions.meta.full_text,
     .option_docs = .{
         .@"ocp-number" = "Specify the number of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/ocp<N>. Defaults to 0",
         .@"timecard-name" = "Specify the name of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/<NAME>. Overrides --ocp-number",
@@ -74,7 +61,7 @@ const MroOptions = struct {
 
 const InfoOptions = struct {
     pub const meta = .{
-        .full_text = "Dump all info collected about the time card as a single JSON object",
+        .full_text = "Dump all info collected about the time card as a single JSON object to standard output",
     };
 };
 
@@ -86,7 +73,7 @@ const Verbs = union(enum) {
 const ParsedArgs = argsParser.ParseArgsResult(CommonOptions, Verbs);
 
 fn log_error(err: argsParser.Error) !void {
-    std.log.err("{f}", .{err});
+    log.scoped(.cli).err("{f}", .{err});
 }
 
 fn get_timecard_path(gpa: std.mem.Allocator, options: ParsedArgs) ![]const u8 {
@@ -108,10 +95,7 @@ pub fn main() !u8 {
         .ReleaseFast, .ReleaseSmall => std.heap.smp_allocator,
     };
 
-    // Env & logs
-    var env = try std.process.getEnvMap(gpa);
-    defer env.deinit();
-    try axe_log.init(gpa, null, &env);
+    try log.init(gpa, null, null);
 
     // Output stream
     const out_buffer: []u8 = try gpa.alloc(u8, 4096);
@@ -124,13 +108,13 @@ pub fn main() !u8 {
     const options: ParsedArgs = argsParser.parseWithVerbForCurrentProcess(CommonOptions, Verbs, gpa, .{ .forward = log_error }) catch return 1;
     defer options.deinit();
     if (options.options.help or options.verb == null) {
-        try argsParser.printHelp(CommonOptions, build_info.name, output);
         if (options.verb) |verb| {
-            try output.writeByte('\n');
             switch (verb) {
                 .mro => try argsParser.printHelp(MroOptions, build_info.name ++ " mro", output),
                 .info => {},
             }
+        } else {
+            try argsParser.printHelp(CommonOptions, build_info.name, output);
         }
         return 0;
     }
@@ -141,7 +125,11 @@ pub fn main() !u8 {
 
     const timecard_path = try get_timecard_path(gpa, options);
     defer gpa.free(timecard_path);
-    std.log.info("Starting {s} version {s}, with timecard at {s}", .{ build_info.name, build_info.version, timecard_path });
+    log.info("Starting {s} version {s}, with timecard at {s}", .{ build_info.name, build_info.version, timecard_path });
+    if (!std.fs.path.isAbsolute(timecard_path)) {
+        log.errAt(@src(), "Timecard's sysfs path required to be absolute. Provided path: '{s}'", .{timecard_path});
+        return 1;
+    }
 
     var timecard: Timecard = try .fromPath(gpa, timecard_path);
     defer timecard.deinit();

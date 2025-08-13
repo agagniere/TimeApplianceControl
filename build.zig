@@ -13,6 +13,9 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .link_libc = true,
+        .imports = &.{
+            .{ .name = "axe", .module = axe.module("axe") },
+        },
     });
 
     const exe = b.addExecutable(.{
@@ -24,7 +27,6 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "tap", .module = mod },
                 .{ .name = "args", .module = argsParser.module("args") },
-                .{ .name = "axe", .module = axe.module("axe") },
             },
         }),
         .use_llvm = true, // https://github.com/ziglang/zig/issues/24364
