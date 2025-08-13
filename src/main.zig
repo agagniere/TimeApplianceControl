@@ -42,15 +42,20 @@ const CommonOptions = struct {
         .v = "version",
     };
     pub const meta = .{
-        .usage_summary = "[-N NUMBER | -n NAME | -P PATH] [-h] [-v] (mro | info)",
-        .full_text = "Control a time card from Open Compute Project's Time Appliance Project",
-        .option_docs = .{
-            .@"ocp-number" = "Specify the number of the appliance, that is then assumed to be at /sys/class/timecard/ocp<N>. Defaults to 0",
-            .@"timecard-name" = "Specify the name of the appliance, that is then assumed to be at /sys/class/timecard/<NAME>. Overrides --ocp-number",
-            .@"timecard-path" = "Specify the absolute path the appliance. Overrides --timecard-name and --ocp-number",
-            .help = "Display this usage message on standard output and exit successfully",
-            .version = "Show version information of the standard output and exit successfully",
-        },
+        .usage_summary = "[-N NUMBER | -n NAME | -P PATH] [-h] [-v] COMMAND",
+        .full_text =
+        \\Control a time card from Open Compute Project's Time Appliance Project
+        \\
+        \\Commands:
+    ++ "\n  info  " ++ InfoOptions.meta.full_text ++
+    ++ "\n  mro   " ++ MroOptions.meta.full_text,
+    .option_docs = .{
+        .@"ocp-number" = "Specify the number of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/ocp<N>. Defaults to 0",
+        .@"timecard-name" = "Specify the name of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/<NAME>. Overrides --ocp-number",
+        .@"timecard-path" = "Specify the absolute path of the appliance's sysfs. Overrides --timecard-name and --ocp-number",
+        .help = "Display this usage message on standard output and exit successfully",
+        .version = "Show version information of the standard output and exit successfully",
+    },
     };
 };
 
@@ -60,15 +65,22 @@ const MroOptions = struct {
     pub const shorthands = .{};
     pub const meta = .{
         .usage_summary = "[--path PATH]",
+        .full_text = "Interact with an mRO50",
         .option_docs = .{
-            .path = "Specify a custom path to the MRO's serial port. By default, it is determined from the ttyMAC attriibute of the timecard",
+            .path = "Specify a custom path to the MRO's serial port. By default, it is determined from the ttyMAC attribute of the timecard",
         },
+    };
+};
+
+const InfoOptions = struct {
+    pub const meta = .{
+        .full_text = "Dump all info collected about the time card as a single JSON object",
     };
 };
 
 const Verbs = union(enum) {
     mro: MroOptions,
-    info: void,
+    info: InfoOptions,
 };
 
 const ParsedArgs = argsParser.ParseArgsResult(CommonOptions, Verbs);
@@ -111,7 +123,7 @@ pub fn main() !u8 {
     // CLI arguments
     const options: ParsedArgs = argsParser.parseWithVerbForCurrentProcess(CommonOptions, Verbs, gpa, .{ .forward = log_error }) catch return 1;
     defer options.deinit();
-    if (options.options.help) {
+    if (options.options.help or options.verb == null) {
         try argsParser.printHelp(CommonOptions, build_info.name, output);
         if (options.verb) |verb| {
             try output.writeByte('\n');
@@ -134,10 +146,14 @@ pub fn main() !u8 {
     var timecard: Timecard = try .fromPath(gpa, timecard_path);
     defer timecard.deinit();
 
-    var arena: std.heap.ArenaAllocator = .init(gpa);
-    defer arena.deinit();
-    const json = try timecard.to_json(arena.allocator());
-    try output.print("---\n{f}\n", .{std.json.fmt(json, .{})});
-
+    switch (options.verb.?) {
+        .info => {
+            var arena: std.heap.ArenaAllocator = .init(gpa);
+            defer arena.deinit();
+            const json = try timecard.to_json(arena.allocator());
+            try output.print("{f}\n", .{std.json.fmt(json, .{})});
+        },
+        .mro => {},
+    }
     return 0;
 }
