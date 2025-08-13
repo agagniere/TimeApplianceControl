@@ -116,32 +116,48 @@ pub const Timecard = struct {
         }
         {
             var ptp: std.json.ObjectMap = .init(arena);
-            var caps: std.json.ObjectMap = .init(arena);
-            var pins: std.json.Array = .init(arena);
-            try caps.ensureTotalCapacity(8);
-            try pins.ensureTotalCapacity(@intCast(self.ptp_info.capabilities.n_pins));
-            try caps.put("programmable_alarms", .{ .integer = self.ptp_info.capabilities.n_alarm });
-            try caps.put("external_timestamp_channels", .{ .integer = self.ptp_info.capabilities.n_ext_ts });
-            try caps.put("periodic_signals", .{ .integer = self.ptp_info.capabilities.n_per_out });
-            try caps.put("pps_callback", .{ .bool = (self.ptp_info.capabilities.pps != 0) });
-            try caps.put("cross_timestamping", .{ .bool = (self.ptp_info.capabilities.cross_timestamping != 0) });
-            try caps.put("phase_adjustment", .{ .bool = (self.ptp_info.capabilities.adjust_phase != 0) });
-            for (self.ptp_info.pins) |pin| {
-                const name: [*:0]const u8 = pin.name[0..(pin.name.len - 1) :0];
-                var obj: std.json.ObjectMap = .init(arena);
-                try obj.put("name", .{ .string = try arena.dupe(u8, std.mem.span(name)) });
-                try obj.put("function", .{ .string = _ptp.pin_function_string[pin.func] });
-                try obj.put("channel", .{ .integer = pin.chan });
-                try pins.append(.{ .object = obj });
-            }
+
             try ptp.put("name", .{ .string = self.ptp_info.name });
-            try ptp.put("capabilities", .{ .object = caps });
-            try ptp.put("pins", .{ .array = pins });
+            {
+                var caps: std.json.ObjectMap = .init(arena);
+                try caps.ensureTotalCapacity(8);
+                {
+                    var freqadj: std.json.ObjectMap = .init(arena);
+                    try freqadj.put("value", .{ .integer = self.ptp_info.capabilities.max_adj });
+                    try freqadj.put("unit", .{ .string = try arena.dupe(u8, "ppb") });
+                    try caps.put("max_frequency_adjustment", .{ .object = freqadj });
+                }
+                try caps.put("programmable_alarms", .{ .integer = self.ptp_info.capabilities.n_alarm });
+                try caps.put("external_timestamp_channels", .{ .integer = self.ptp_info.capabilities.n_ext_ts });
+                try caps.put("periodic_output_signals", .{ .integer = self.ptp_info.capabilities.n_per_out });
+                try caps.put("pps_callback", .{ .bool = (self.ptp_info.capabilities.pps != 0) });
+                try caps.put("cross_timestamping", .{ .bool = (self.ptp_info.capabilities.cross_timestamping != 0) });
+                try caps.put("phase_adjustment", .{ .bool = (self.ptp_info.capabilities.adjust_phase != 0) });
+                {
+                    var phaseadj: std.json.ObjectMap = .init(arena);
+                    try phaseadj.put("value", .{ .integer = self.ptp_info.capabilities.max_phase_adj });
+                    try phaseadj.put("unit", .{ .string = try arena.dupe(u8, "ns") });
+                    try caps.put("max_phase_adjustment", .{ .object = phaseadj });
+                }
+                try ptp.put("capabilities", .{ .object = caps });
+            }
+            {
+                var pins: std.json.Array = .init(arena);
+                try pins.ensureTotalCapacity(@intCast(self.ptp_info.capabilities.n_pins));
+                for (self.ptp_info.pins) |pin| {
+                    const name: [*:0]const u8 = pin.name[0..(pin.name.len - 1) :0];
+                    var obj: std.json.ObjectMap = .init(arena);
+                    try obj.put("name", .{ .string = try arena.dupe(u8, std.mem.span(name)) });
+                    try obj.put("function", .{ .string = _ptp.pin_function_string[pin.func] });
+                    try obj.put("channel", .{ .integer = pin.chan });
+                    try pins.append(.{ .object = obj });
+                }
+                try ptp.put("pins", .{ .array = pins });
+            }
             try top.put("ptp", .{ .object = ptp });
         }
         {
             var pci: std.json.ObjectMap = .init(arena);
-            try pci.ensureTotalCapacity(8);
             try pci.put("vendor", if (self.pci_info.vendor) |vendor| .{ .string = @tagName(vendor) } else .null);
             try pci.put("device", if (self.pci_info.device) |device| .{ .string = @tagName(device) } else .null);
             try pci.put("revision", .{ .integer = self.pci_info.revision });
