@@ -26,9 +26,7 @@ pub const PtpInfo = struct {
     capabilities: linux.struct_ptp_clock_caps,
     pins: []linux.struct_ptp_pin_desc,
 
-    const Self = @This();
-
-    pub fn init(alloc: Allocator, timecard_root: std.fs.Dir) !Self {
+    pub fn init(alloc: Allocator, timecard_root: std.fs.Dir) !PtpInfo {
         var dir = timecard_root.openDir("ptp", .{}) catch |err| {
             log.errAt(@src(), "Timecard sysfs expected to have a folder called 'ptp': {t}", .{err});
             return err;
@@ -62,7 +60,7 @@ pub const PtpInfo = struct {
         };
     }
 
-    pub fn deinit(self: *Self, gpa: Allocator) void {
+    pub fn deinit(self: *PtpInfo, gpa: Allocator) void {
         gpa.free(self.name);
         gpa.free(self.pins);
     }

@@ -7,7 +7,7 @@ const Vendor = enum {
     Orolia,
     Adva,
 
-    pub fn fromID(id: u16) ?@This() {
+    pub fn fromID(id: u16) ?Vendor {
         return switch (id) {
             0x1d9b => .Facebook,
             0x18d4 => .Celestica,
@@ -24,7 +24,7 @@ const Device = enum {
     @"Celestica Timecard",
     @"ART Card",
 
-    pub fn fromID(id: u16) ?@This() {
+    pub fn fromID(id: u16) ?Device {
         return switch (id) {
             0x0400 => .Timecard,
             0x1008 => .@"Celestica Timecard",
@@ -55,7 +55,7 @@ pub const PciInfo = struct {
     max_speed: []const u8,
     max_width: u8,
 
-    pub fn fromDir(gpa: std.mem.Allocator, dir: std.fs.Dir) !@This() {
+    pub fn fromDir(gpa: std.mem.Allocator, dir: std.fs.Dir) !PciInfo {
         var buffer: [64]u8 = undefined;
         const content = try dir.readFile("max_link_speed", &buffer);
         return .{
@@ -67,7 +67,7 @@ pub const PciInfo = struct {
         };
     }
 
-    pub fn deinit(self: *@This(), gpa: std.mem.Allocator) void {
+    pub fn deinit(self: *PciInfo, gpa: std.mem.Allocator) void {
         gpa.free(self.max_speed);
     }
 };

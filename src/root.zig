@@ -42,7 +42,7 @@ const Connector = struct {
 
     pub const Way = enum { input, output };
 
-    pub fn fromFile(alloc: Allocator, parent: std.fs.Dir, filename: []const u8) !@This() {
+    pub fn fromFile(alloc: Allocator, parent: std.fs.Dir, filename: []const u8) !Connector {
         var buffer: [32]u8 = undefined;
         const content = try parent.readFile(filename, &buffer);
         const comma = std.mem.indexOfScalar(u8, content, ':');
@@ -68,7 +68,7 @@ const Connector = struct {
         };
     }
 
-    pub fn deinit(self: *@This(), gpa: Allocator) void {
+    pub fn deinit(self: *Connector, gpa: Allocator) void {
         gpa.free(self.name);
         gpa.free(self.value);
     }
@@ -113,15 +113,13 @@ pub const Timecard = struct {
     available_input_formats: [][]const u8,
     available_output_formats: [][]const u8,
 
-    const Self = @This();
-
-    pub fn fromPath(gpa: Allocator, path: []const u8) !Self {
+    pub fn fromPath(gpa: Allocator, path: []const u8) !Timecard {
         var dir = try std.fs.openDirAbsolute(path, .{ .iterate = true });
         defer dir.close();
         return fromDir(gpa, std.fs.path.basename(path), dir);
     }
 
-    fn fromDir(gpa: Allocator, name: []const u8, dir: std.fs.Dir) !Self {
+    fn fromDir(gpa: Allocator, name: []const u8, dir: std.fs.Dir) !Timecard {
         var pci_device = dir.openDir("device", .{}) catch |err| {
             log.errAt(@src(), "Expected a 'device' folder in the sysfs of {s}: {t}", .{ name, err });
             return err;
@@ -173,7 +171,7 @@ pub const Timecard = struct {
         };
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: *Timecard) void {
         self.pci_info.deinit(self.allocator);
         self.ptp_info.deinit(self.allocator);
         self.allocator.free(self.name);
@@ -201,7 +199,7 @@ pub const Timecard = struct {
         self.allocator.free(self.available_output_formats);
     }
 
-    pub fn to_json(self: Self, arena: Allocator) !std.json.Value {
+    pub fn to_json(self: Timecard, arena: Allocator) !std.json.Value {
         var top: std.json.ObjectMap = .init(arena);
         try top.ensureTotalCapacity(8);
         {
