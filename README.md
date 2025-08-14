@@ -12,7 +12,29 @@ A command line interface for timecards of Open Compute's Time Appliance Project
 
 [Zig](https://ziglang.org/download/) master (`0.15.0-dev.1380` or newer)
 
+## Usage
+
+```console
+$ zig build run
+Usage: tapctl [-N NUMBER | -n NAME | -P PATH] [-h] [-v] COMMAND
+
+Control a time card from Open Compute Project's Time Appliance Project
+
+Commands:
+  info  Dump all info collected about the time card as a single JSON object to standard output
+  mro   Interact with an mRO50
+
+Options:
+  -N, --ocp-number      Specify the number of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/ocp<N>. Defaults to 0
+  -n, --timecard-name   Specify the name of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/<NAME>. Overrides --ocp-number
+  -P, --timecard-path   Specify the absolute path of the appliance's sysfs. Overrides --timecard-name and --ocp-number
+  -h, --help            Display this usage message on standard output and exit successfully
+  -v, --version         Show version information of the standard output and exit successfully
+```
+
 ## Demo
+
+Note: Super user privilege is required to access `/dev/ptp<N>`
 
 ### Meta Timecard
 
@@ -26,7 +48,7 @@ A command line interface for timecards of Open Compute's Time Appliance Project
 {"card":{"name":"ocp0","clock_source":"PPS","connectors":[{"name":"sma4","way":"output","format":"PHC"},{"name":"sma2","way":"input","format":"PPS1"},{"name":"sma3","way":"output","format":"10Mhz"},{"name":"sma1","way":"input","format":"10Mhz"}],"available":{"clock_source":["NONE","TOD","IRIG","PPS","PTP","RTC","DCF","REGS","EXT"],"formats":{"input":["10Mhz","PPS1","PPS2","TS1","TS2","IRIG","DCF","TS3","TS4","FREQ1","FREQ2","FREQ3","FREQ4","None"],"output":["10Mhz","PHC","MAC","GNSS1","GNSS2","IRIG","DCF","GEN1","GEN2","GEN3","GEN4","GND","VCC"]}}},"serial_ports":{"GNSS":"ttyS4","NMEA":"ttyS7","MAC":"ttyS6","GNSS2":"ttyS5"},"ptp":{"name":"ptp1","capabilities":{"max_frequency_adjustment":{"value":100000000,"unit":"ppb"},"programmable_alarms":0,"external_timestamp_channels":6,"periodic_output_signals":5,"pps_callback":true,"cross_timestamping":false,"phase_adjustment":true,"max_phase_adjustment":{"value":0,"unit":"ns"}},"pins":[{"name":"sma1","function":"None","channel":0},{"name":"sma2","function":"None","channel":0},{"name":"sma3","function":"None","channel":0},{"name":"sma4","function":"None","channel":0}]},"pci":{"vendor":"Facebook","device":"Timecard","revision":0,"max_speed":"2.5 GT/s PCIe","max_width":1}}
 ```
 
-Note that the parsing of the serial number failed, because the only such card I have access to doesn't have a correctly flahed serial number in its EEPROM.
+Note that the parsing of the serial number failed, because the only such card I have access to doesn't have a correctly flashed serial number in its EEPROM.
 
 ### Orolia ART Card
 
