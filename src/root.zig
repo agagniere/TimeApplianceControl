@@ -85,6 +85,20 @@ fn findConnectors(alloc: Allocator, dir: std.fs.Dir) ![]Connector {
     return result.toOwnedSlice(alloc);
 }
 
+fn readListFromFile(alloc: Allocator, dir: std.fs.Dir, filename: []const u8) ![][]const u8 {
+    var result: std.ArrayListUnmanaged([]const u8) = .empty;
+    var buffer: [256]u8 = undefined;
+    const content = dir.readFile(filename, &buffer) catch |err| {
+        log.errAt(@src(), "A file called '{s}' is expected in the card's sysfs: {t}", .{ filename, err });
+        return err;
+    };
+    var words = std.mem.tokenizeAny(u8, content, " \n");
+    while (words.next()) |word| {
+        try result.append(alloc, try alloc.dupe(u8, word));
+    }
+    return result.toOwnedSlice(alloc);
+}
+
 /// Time Appliance handle
 pub const Timecard = struct {
     allocator: Allocator,
@@ -94,6 +108,10 @@ pub const Timecard = struct {
     pci_info: PciInfo,
     ptp_info: PtpInfo,
     ios: []Connector,
+    clock_source: []const u8,
+    available_clock_sources: [][]const u8,
+    available_input_formats: [][]const u8,
+    available_output_formats: [][]const u8,
 
     const Self = @This();
 
@@ -126,6 +144,12 @@ pub const Timecard = struct {
         const owned_name = try gpa.dupe(u8, name);
         errdefer gpa.free(owned_name);
 
+        var buffer: [16]u8 = undefined;
+        const clock_source = dir.readFile("clock_source", &buffer) catch |err| {
+            log.errAt(@src(), "Expecting a file called 'clock_source' in {s}'s sysfs: {t}", .{ name, err });
+            return err;
+        };
+
         return .{
             .allocator = gpa,
             .name = owned_name,
@@ -137,6 +161,10 @@ pub const Timecard = struct {
             .pci_info = pci_info,
             .ptp_info = ptp_info,
             .ios = try findConnectors(gpa, dir),
+            .clock_source = try gpa.dupe(u8, std.mem.trim(u8, clock_source, "\n")),
+            .available_clock_sources = try readListFromFile(gpa, dir, "available_clock_sources"),
+            .available_input_formats = try readListFromFile(gpa, dir, "available_sma_inputs"),
+            .available_output_formats = try readListFromFile(gpa, dir, "available_sma_outputs"),
         };
     }
 
@@ -144,6 +172,7 @@ pub const Timecard = struct {
         self.pci_info.deinit(self.allocator);
         self.ptp_info.deinit(self.allocator);
         self.allocator.free(self.name);
+        self.allocator.free(self.clock_source);
 
         var ttys = self.serial_ports_name.iterator();
         while (ttys.next()) |tty| {
@@ -156,6 +185,15 @@ pub const Timecard = struct {
             io.deinit(self.allocator);
         }
         self.allocator.free(self.ios);
+        for (self.available_clock_sources) |s|
+            self.allocator.free(s);
+        self.allocator.free(self.available_clock_sources);
+        for (self.available_input_formats) |s|
+            self.allocator.free(s);
+        self.allocator.free(self.available_input_formats);
+        for (self.available_output_formats) |s|
+            self.allocator.free(s);
+        self.allocator.free(self.available_output_formats);
     }
 
     pub fn to_json(self: Self, arena: Allocator) !std.json.Value {
@@ -167,16 +205,43 @@ pub const Timecard = struct {
                 try card.put("serial_number", .{ .integer = num });
             }
             try card.put("name", .{ .string = self.name });
+            try card.put("clock_source", .{ .string = self.clock_source });
             {
                 var smas: std.json.Array = .init(arena);
                 for (self.ios) |io| {
                     var sma: std.json.ObjectMap = .init(arena);
                     try sma.put("name", .{ .string = io.name });
-                    try sma.put("way", .{ .string = try std.fmt.allocPrint(arena, "{t}", .{io.way}) });
-                    try sma.put("current", .{ .string = io.value });
+                    try sma.put("way", .{ .string = try arena.dupe(u8, @tagName(io.way)) });
+                    try sma.put("format", .{ .string = io.value });
                     try smas.append(.{ .object = sma });
                 }
                 try card.put("connectors", .{ .array = smas });
+            }
+            {
+                var available: std.json.ObjectMap = .init(arena);
+                {
+                    var clocksrcs: std.json.Array = .init(arena);
+                    for (self.available_clock_sources) |clcksrc|
+                        try clocksrcs.append(.{ .string = clcksrc });
+                    try available.put("clock_source", .{ .array = clocksrcs });
+                }
+                {
+                    var formats: std.json.ObjectMap = .init(arena);
+                    {
+                        var input: std.json.Array = .init(arena);
+                        for (self.available_input_formats) |fmt|
+                            try input.append(.{ .string = fmt });
+                        try formats.put("input", .{ .array = input });
+                    }
+                    {
+                        var output: std.json.Array = .init(arena);
+                        for (self.available_output_formats) |fmt|
+                            try output.append(.{ .string = fmt });
+                        try formats.put("output", .{ .array = output });
+                    }
+                    try available.put("formats", .{ .object = formats });
+                }
+                try card.put("available", .{ .object = available });
             }
             try top.put("card", .{ .object = card });
         }
