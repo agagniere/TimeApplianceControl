@@ -134,8 +134,13 @@ pub const Timecard = struct {
 
         var pci_info: PciInfo = try .fromDir(gpa, pci_device);
         errdefer pci_info.deinit(gpa);
-        //if (pci_info.vendor != null and pci_info.device != null)
-        log.info("Card {s} detected as {t} {t} rev. {}, PCI x{}", .{ name, pci_info.vendor.?, pci_info.device.?, pci_info.revision, pci_info.max_width });
+        log.info("Card {s} detected as {s} {s} rev. {}, PCI x{}", .{
+            name,
+            if (pci_info.vendor) |vendor| @tagName(vendor) else "(unknown vendor)",
+            if (pci_info.device) |device| @tagName(device) else "(unknown device)",
+            pci_info.revision,
+            pci_info.max_width,
+        });
 
         var ptp_info: PtpInfo = try .init(gpa, dir);
         errdefer ptp_info.deinit(gpa);
@@ -298,8 +303,8 @@ pub const Timecard = struct {
         }
         {
             var pci: std.json.ObjectMap = .init(arena);
-            try pci.put("vendor", if (self.pci_info.vendor) |vendor| .{ .string = @tagName(vendor) } else .null);
-            try pci.put("device", if (self.pci_info.device) |device| .{ .string = @tagName(device) } else .null);
+            try pci.put("vendor", if (self.pci_info.vendor) |vendor| .{ .string = try arena.dupe(u8, @tagName(vendor)) } else .null);
+            try pci.put("device", if (self.pci_info.device) |device| .{ .string = try arena.dupe(u8, @tagName(device)) } else .null);
             try pci.put("revision", .{ .integer = self.pci_info.revision });
             try pci.put("max_speed", .{ .string = self.pci_info.max_speed });
             try pci.put("max_width", .{ .integer = self.pci_info.max_width });
