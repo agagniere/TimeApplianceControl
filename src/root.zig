@@ -103,6 +103,7 @@ fn readListFromFile(alloc: Allocator, dir: std.fs.Dir, filename: []const u8) ![]
 pub const Timecard = struct {
     allocator: Allocator,
     name: []const u8,
+    path: []const u8,
     serialnumber: ?u32,
     serial_ports_name: NameMap,
     pci_info: PciInfo,
@@ -116,10 +117,10 @@ pub const Timecard = struct {
     pub fn fromPath(gpa: Allocator, path: []const u8) !Timecard {
         var dir = try std.fs.openDirAbsolute(path, .{ .iterate = true });
         defer dir.close();
-        return fromDir(gpa, std.fs.path.basename(path), dir);
-    }
 
-    fn fromDir(gpa: Allocator, name: []const u8, dir: std.fs.Dir) !Timecard {
+        const name = try gpa.dupe(u8, std.fs.path.basename(path));
+        errdefer gpa.free(name);
+
         var pci_device = dir.openDir("device", .{}) catch |err| {
             log.errAt(@src(), "Expected a 'device' folder in the sysfs of {s}: {t}", .{ name, err });
             return err;
@@ -144,9 +145,6 @@ pub const Timecard = struct {
         errdefer ptp_info.deinit(gpa);
         log.info("Card {s} exposes PTP clock {s}", .{ name, ptp_info.name });
 
-        const owned_name = try gpa.dupe(u8, name);
-        errdefer gpa.free(owned_name);
-
         var buffer: [16]u8 = undefined;
         const clock_source = dir.readFile("clock_source", &buffer) catch |err| {
             log.errAt(@src(), "Expecting a file called 'clock_source' in {s}'s sysfs: {t}", .{ name, err });
@@ -155,7 +153,8 @@ pub const Timecard = struct {
 
         return .{
             .allocator = gpa,
-            .name = owned_name,
+            .name = name,
+            .path = try gpa.dupe(u8, path),
             .serialnumber = readSerialNumber(dir) catch |err| blk: {
                 log.errAt(@src(), "Unable to read serial number of {s}: {t}", .{ name, err });
                 break :blk null;
@@ -175,6 +174,7 @@ pub const Timecard = struct {
         self.pci_info.deinit(self.allocator);
         self.ptp_info.deinit(self.allocator);
         self.allocator.free(self.name);
+        self.allocator.free(self.path);
         self.allocator.free(self.clock_source);
 
         var ttys = self.serial_ports_name.iterator();
@@ -208,6 +208,7 @@ pub const Timecard = struct {
                 try card.put("serial_number", .{ .integer = num });
             }
             try card.put("name", .{ .string = self.name });
+            try card.put("path", .{ .string = self.path });
             try card.put("clock_source", .{ .string = self.clock_source });
             {
                 var smas: std.json.Array = .init(arena);
