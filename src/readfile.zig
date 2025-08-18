@@ -3,7 +3,7 @@ const log = @import("log.zig").config.scoped(.timecard);
 const Allocator = std.mem.Allocator;
 
 /// Interpret the contents of the file as an integer
-pub fn readFileInteger(
+pub fn readIntegerFromFile(
     /// Used in logs to describe where a file is expected
     comptime location: []const u8,
     T: type,

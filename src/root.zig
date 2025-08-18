@@ -5,7 +5,10 @@ pub const PciInfo = @import("pci.zig").PciInfo;
 const _ptp = @import("ptp.zig");
 pub const PtpInfo = _ptp.PtpInfo;
 pub const Log = @import("log.zig").config;
-const readListFromFile = @import("readfile.zig").readListFromFile;
+
+const readfile = @import("readfile.zig");
+const readListFromFile = readfile.readListFromFile;
+const readIntegerFromFile = readfile.readIntegerFromFile;
 
 const log = Log.scoped(.timecard);
 
@@ -104,6 +107,7 @@ pub const Timecard = struct {
     available_clock_sources: [][]const u8,
     available_input_formats: [][]const u8,
     available_output_formats: [][]const u8,
+    pci_delay_compensation: u32,
 
     pub fn fromPath(gpa: Allocator, path: []const u8) !Timecard {
         var dir = try std.fs.openDirAbsolute(path, .{ .iterate = true });
@@ -142,6 +146,11 @@ pub const Timecard = struct {
             return err;
         };
 
+        const pci_delay: i64 = try readIntegerFromFile("timecard's sysfs", i64, dir, "ts_window_adjust");
+        if (pci_delay < std.math.minInt(u32) or pci_delay > std.math.maxInt(u32)) {
+            log.errAt(@src(), "Timecard {s}'s timestamp window adjustement value {} doesn't fit in an u32. This is a known bug from linux 6.12 to 6.17. To fix: sudo bash -c 'echo 0 > {s}/ts_window_adjust'", .{ name, pci_delay, path });
+        }
+
         return .{
             .allocator = gpa,
             .name = name,
@@ -158,6 +167,7 @@ pub const Timecard = struct {
             .available_clock_sources = try readListFromFile("timecard's sysfs", gpa, dir, "available_clock_sources"),
             .available_input_formats = try readListFromFile("timecard's sysfs", gpa, dir, "available_sma_inputs"),
             .available_output_formats = try readListFromFile("timecard's sysfs", gpa, dir, "available_sma_outputs"),
+            .pci_delay_compensation = @truncate(@as(u64, @bitCast(pci_delay))),
         };
     }
 
@@ -201,6 +211,7 @@ pub const Timecard = struct {
             try card.put("name", .{ .string = self.name });
             try card.put("path", .{ .string = self.path });
             try card.put("clock_source", .{ .string = self.clock_source });
+            try card.put("timestamp_window_adjustment", .{ .integer = self.pci_delay_compensation });
             {
                 var smas: std.json.Array = .init(arena);
                 for (self.ios) |io| {

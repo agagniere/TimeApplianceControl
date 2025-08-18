@@ -1,5 +1,5 @@
 const std = @import("std");
-const readFileInteger = @import("readfile.zig").readFileInteger;
+const readFileInteger = @import("readfile.zig").readIntegerFromFile;
 
 const Vendor = enum {
     Facebook,
