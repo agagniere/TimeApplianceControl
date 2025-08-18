@@ -1,5 +1,5 @@
 const std = @import("std");
-const log = @import("log.zig").config.scoped(.timecard);
+const readFileInteger = @import("readfile.zig").readFileInteger;
 
 const Vendor = enum {
     Facebook,
@@ -34,19 +34,6 @@ const Device = enum {
     }
 };
 
-/// Interpret the contents of the file as an integer
-fn readFileInteger(T: type, dir: std.fs.Dir, filename: []const u8) !T {
-    var buffer: [64]u8 = undefined;
-    const content = dir.readFile(filename, &buffer) catch |err| {
-        log.errAt(@src(), "PCI sysfs is expected to contain a file called '{s}': {t}", .{ filename, err });
-        return err;
-    };
-    return std.fmt.parseInt(T, std.mem.trim(u8, content, "\n"), 0) catch |err| {
-        log.errAt(@src(), "The file '{s}' in PCI sysfs is expected to contain an integer: {t}", .{ filename, err });
-        return err;
-    };
-}
-
 /// Info exposed by the sysfs about the PCI device
 pub const PciInfo = struct {
     vendor: ?Vendor,
@@ -59,10 +46,10 @@ pub const PciInfo = struct {
         var buffer: [64]u8 = undefined;
         const content = try dir.readFile("max_link_speed", &buffer);
         return .{
-            .vendor = .fromID(try readFileInteger(u16, dir, "vendor")),
-            .device = .fromID(try readFileInteger(u16, dir, "device")),
-            .revision = try readFileInteger(u8, dir, "revision"),
-            .max_width = try readFileInteger(u8, dir, "max_link_width"),
+            .vendor = .fromID(try readFileInteger("PCI sysfs", u16, dir, "vendor")),
+            .device = .fromID(try readFileInteger("PCI sysfs", u16, dir, "device")),
+            .revision = try readFileInteger("PCI sysfs", u8, dir, "revision"),
+            .max_width = try readFileInteger("PCI sysfs", u8, dir, "max_link_width"),
             .max_speed = try gpa.dupe(u8, std.mem.trim(u8, content, "\n ")),
         };
     }

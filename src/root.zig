@@ -5,6 +5,7 @@ pub const PciInfo = @import("pci.zig").PciInfo;
 const _ptp = @import("ptp.zig");
 pub const PtpInfo = _ptp.PtpInfo;
 pub const Log = @import("log.zig").config;
+const readListFromFile = @import("readfile.zig").readListFromFile;
 
 const log = Log.scoped(.timecard);
 
@@ -30,7 +31,11 @@ fn getSerialPortsName(gpa: Allocator, root: std.fs.Dir) !NameMap {
     while (try ttys.next()) |tty_file| {
         assert(std.mem.startsWith(u8, tty_file.name, "tty"));
         assert(tty_file.kind == .file);
-        try result.put(gpa, try gpa.dupe(u8, tty_file.name[3..]), try gpa.dupe(u8, try tty_dir.readFile(tty_file.name, &buffer)));
+        try result.put(
+            gpa,
+            try gpa.dupe(u8, tty_file.name[3..]),
+            try gpa.dupe(u8, try tty_dir.readFile(tty_file.name, &buffer)),
+        );
     }
     return result;
 }
@@ -81,20 +86,6 @@ fn findConnectors(alloc: Allocator, dir: std.fs.Dir) ![]Connector {
         if (std.mem.startsWith(u8, file.name, "sma")) {
             try result.append(alloc, try .fromFile(alloc, dir, file.name));
         }
-    }
-    return result.toOwnedSlice(alloc);
-}
-
-fn readListFromFile(alloc: Allocator, dir: std.fs.Dir, filename: []const u8) ![][]const u8 {
-    var result: std.ArrayListUnmanaged([]const u8) = .empty;
-    var buffer: [256]u8 = undefined;
-    const content = dir.readFile(filename, &buffer) catch |err| {
-        log.errAt(@src(), "A file called '{s}' is expected in the card's sysfs: {t}", .{ filename, err });
-        return err;
-    };
-    var words = std.mem.tokenizeAny(u8, content, " \n");
-    while (words.next()) |word| {
-        try result.append(alloc, try alloc.dupe(u8, word));
     }
     return result.toOwnedSlice(alloc);
 }
@@ -164,9 +155,9 @@ pub const Timecard = struct {
             .ptp_info = ptp_info,
             .ios = try findConnectors(gpa, dir),
             .clock_source = try gpa.dupe(u8, std.mem.trim(u8, clock_source, "\n")),
-            .available_clock_sources = try readListFromFile(gpa, dir, "available_clock_sources"),
-            .available_input_formats = try readListFromFile(gpa, dir, "available_sma_inputs"),
-            .available_output_formats = try readListFromFile(gpa, dir, "available_sma_outputs"),
+            .available_clock_sources = try readListFromFile("timecard's sysfs", gpa, dir, "available_clock_sources"),
+            .available_input_formats = try readListFromFile("timecard's sysfs", gpa, dir, "available_sma_inputs"),
+            .available_output_formats = try readListFromFile("timecard's sysfs", gpa, dir, "available_sma_outputs"),
         };
     }
 
