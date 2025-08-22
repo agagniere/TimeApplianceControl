@@ -163,23 +163,21 @@ pub fn main() !u8 {
             const json = try timecard.to_json(arena.allocator());
             try output.print("{f}\n", .{std.json.fmt(json, .{})});
         },
-        .monitor => |monitor_options| try monitor(gpa, timecard, monitor_options),
+        .monitor => |monitor_options| try start_monitoring(gpa, timecard, monitor_options),
         .mro => {},
     }
     return 0;
 }
 
-fn monitor(
+fn start_monitoring(
     gpa: std.mem.Allocator,
     timecard: Timecard,
     options: MonitorOptions,
 ) !void {
-    _ = timecard;
-    var buffer: [512]u8 = undefined;
-    const socket_fd = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM | std.posix.SOCK.CLOEXEC, 0);
-    var statsd_fd: std.fs.File = .{ .handle = socket_fd };
-    var statsd = statsd_fd.writer(&buffer);
-    defer statsd.interface.flush() catch unreachable;
+    var buffer: [2048]u8 = undefined;
+    const udp_socket = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM | std.posix.SOCK.CLOEXEC, 0);
+    var statsd_file: std.fs.File = .{ .handle = udp_socket };
+    var statsd_writer = statsd_file.writer(&buffer);
     const addresses = try std.net.getAddressList(gpa, options.@"statsd-address", options.@"statsd-port");
     defer addresses.deinit();
 
@@ -187,16 +185,33 @@ fn monitor(
         log.debug("Statsd canonical address: {s}", .{name});
     }
     for (addresses.addrs) |address| {
-        std.posix.connect(socket_fd, &address.any, address.getOsSockLen()) catch |err| {
+        std.posix.connect(udp_socket, &address.any, address.getOsSockLen()) catch |err| {
             log.warnAt(@src(), "{f}: {t}", .{ address, err });
             continue;
         };
         log.info("Will send statds metrics to {f}", .{address});
-
-        try statsd.interface.print("foo:{}|c\n", .{1});
+        try monitor(gpa, timecard, &statsd_writer.interface);
         break;
     } else {
         log.errAt(@src(), "Failed to connect to {s}:{}", .{ options.@"statsd-address", options.@"statsd-port" });
         return error.ConnexionFailed;
+    }
+}
+
+fn monitor(
+    gpa: std.mem.Allocator,
+    timecard: Timecard,
+    socket: *std.Io.Writer,
+) !void {
+    _ = gpa;
+
+    while (true) {
+        const reading = try timecard.ptp_info.readOffset(true);
+        std.log.debug("{s}: {D}", .{ timecard.ptp_info.name, reading });
+        try socket.print("{s}.offset:0|g\n{s}.offset:{}|g", .{ timecard.ptp_info.name, timecard.ptp_info.name, reading });
+
+        try socket.flush();
+
+        std.Thread.sleep(10 * std.time.ns_per_s);
     }
 }

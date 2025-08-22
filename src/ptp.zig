@@ -64,10 +64,20 @@ pub const PtpInfo = struct {
 
     /// Returns the difference in nanosecond
     fn diff(a: linux.struct_ptp_clock_time, b: linux.struct_ptp_clock_time) i64 {
-        return a.nsec - b.nsec + std.time.ns_per_s * (a.sec - b.nsec);
+        const a_ns: i64 = a.nsec;
+        const b_ns: i64 = b.nsec;
+        const sec_diff: i64 = a.sec - b.sec;
+        return a_ns - b_ns + std.time.ns_per_s * sec_diff;
     }
 
-    pub fn readOffset(self: *PtpInfo) !i64 {
+    /// Returns how many nanoseconds to add to system clock to find the card's time
+    /// So the value is negative if the card is late,
+    /// positive if the clock is early
+    pub fn readOffset(
+        self: PtpInfo,
+        /// Wether to take UTC TAI offset into account
+        tai: bool,
+    ) !i64 {
         var offset: linux.struct_ptp_sys_offset_extended = .{ .n_samples = 1 };
         if (std.c.ioctl(self.device.handle, @bitCast(sys_offset_extended), &offset) != 0)
             return error.FailedIoctl;
@@ -77,12 +87,15 @@ pub const PtpInfo = struct {
             log.debug("[{}]   ts {any}", .{ i, offset.ts[i][1] });
             log.debug("[{}] post {any}", .{ i, offset.ts[i][2] });
         }
-        const left = diff(offset.ts[0][1], offset.ts[0][0]);
-        const right = diff(offset.ts[0][2], offset.ts[0][1]);
-        if (left < 0 or right < 0) {
-            log.warnAt(@src(), "Non monotonic clock readings ! This might be due to an invalid ts_window_adjust value, set it to 0", .{});
+        const sys_window = diff(offset.ts[0][2], offset.ts[0][0]);
+        if (sys_window < 0) {
+            log.errAt(@src(), "Non monotonic system clock, unable to make a reading. This might be due to an invalid ts_window_adjust value, consider setting it to 0", .{});
+            return error.NonMonotonicSystemClock;
         }
-        return if (@abs(left) < @abs(right)) left else right;
+        if (tai) {
+            return diff(offset.ts[0][1], offset.ts[0][0]) - @divTrunc(sys_window, 2) - 37 * std.time.ns_per_s;
+        }
+        return diff(offset.ts[0][1], offset.ts[0][0]) - @divTrunc(sys_window, 2);
     }
 
     pub fn deinit(self: *PtpInfo, gpa: Allocator) void {
