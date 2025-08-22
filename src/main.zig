@@ -19,6 +19,7 @@ const CommonOptions = struct {
     @"timecard-path": ?[]const u8 = null,
     help: bool = false,
     version: bool = false,
+    pub const wrap_len = 40;
 
     pub const shorthands = .{
         .N = "ocp-number",

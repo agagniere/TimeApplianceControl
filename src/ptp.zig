@@ -78,24 +78,16 @@ pub const PtpInfo = struct {
         /// Wether to take UTC TAI offset into account
         tai: bool,
     ) !i64 {
-        var offset: linux.struct_ptp_sys_offset_extended = .{ .n_samples = 1 };
-        if (std.c.ioctl(self.device.handle, @bitCast(sys_offset_extended), &offset) != 0)
+        var readings: linux.struct_ptp_sys_offset_extended = .{ .n_samples = 1 };
+        if (std.c.ioctl(self.device.handle, @bitCast(sys_offset_extended), &readings) != 0)
             return error.FailedIoctl;
-        log.debug("sys offset extended: {} samples, clock {}", .{ offset.n_samples, offset.clockid });
-        for (0..1) |i| {
-            log.debug("[{}]  pre {any}", .{ i, offset.ts[i][0] });
-            log.debug("[{}]   ts {any}", .{ i, offset.ts[i][1] });
-            log.debug("[{}] post {any}", .{ i, offset.ts[i][2] });
-        }
-        const sys_window = diff(offset.ts[0][2], offset.ts[0][0]);
+        const sys_window = diff(readings.ts[0][2], readings.ts[0][0]);
         if (sys_window < 0) {
             log.errAt(@src(), "Non monotonic system clock, unable to make a reading. This might be due to an invalid ts_window_adjust value, consider setting it to 0", .{});
             return error.NonMonotonicSystemClock;
         }
-        if (tai) {
-            return diff(offset.ts[0][1], offset.ts[0][0]) - @divTrunc(sys_window, 2) - 37 * std.time.ns_per_s;
-        }
-        return diff(offset.ts[0][1], offset.ts[0][0]) - @divTrunc(sys_window, 2);
+        const offset: i64 = if (tai) (-37 * std.time.ns_per_s) else 0;
+        return diff(readings.ts[0][1], readings.ts[0][0]) - @divTrunc(sys_window, 2) + offset;
     }
 
     pub fn deinit(self: *PtpInfo, gpa: Allocator) void {

@@ -4,13 +4,13 @@ A command line interface for timecards of Open Compute's Time Appliance Project
 
 ## Roadmap of features
 - [x] Dump all user-space info as JSON
-- [ ] Monitor the clock offset accross time
+- [x] Monitor the clock offset accross time
 - [ ] Monitor GNSS signal status
 - [ ] Monitor oscillator state
 
 ## Requirement
 
-[Zig](https://ziglang.org/download/) master (`0.15.0-dev.1380` or newer)
+[Zig](https://ziglang.org/download/) version `0.15.1`
 
 ## Usage
 
@@ -21,20 +21,46 @@ Usage: tapctl [-N NUMBER | -n NAME | -P PATH] [-h] [-v] COMMAND
 Control a time card from Open Compute Project's Time Appliance Project
 
 Commands:
-  info  Dump all info collected about the time card as a single JSON object to standard output
-  mro   Interact with an mRO50
+  info     Dump all info collected about the time card as a single JSON object to standard output
+  monitor  Collect metrics from the clock and possibly the oscillator, pushed to statsd
+  mro      Interact with an mRO50
 
 Options:
-  -N, --ocp-number      Specify the number of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/ocp<N>. Defaults to 0
-  -n, --timecard-name   Specify the name of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/<NAME>. Overrides --ocp-number
-  -P, --timecard-path   Specify the absolute path of the appliance's sysfs. Overrides --timecard-name and --ocp-number
-  -h, --help            Display this usage message on standard output and exit successfully
-  -v, --version         Show version information of the standard output and exit successfully
+  -N, --ocp-number      Specify the number of the appliance. Its sysfs is
+                        then assumed to be at /sys/class/timecard/ocp<N>.
+                        Defaults to 0
+  -n, --timecard-name   Specify the name of the appliance. Its sysfs is then
+                        assumed to be at /sys/class/timecard/<NAME>.
+                        Overrides --ocp-number
+  -P, --timecard-path   Specify the absolute path of the appliance's sysfs.
+                        Overrides --timecard-name and --ocp-number
+  -h, --help            Display this usage message on standard output and
+                        exit successfully
+  -v, --version         Show version information of the standard output
+                        and exit successfully
 ```
 
 ## Demo
 
 Note: Super user privilege is required to access `/dev/ptp<N>`
+
+### Monitor clock offset
+
+A measurement is done every 10 seconds
+
+```console
+# ./zig-out/bin/tapctl monitor --ocp-number 1
+[INFO ] Starting tapctl version 0.0.1, with timecard at /sys/class/timecard/ocp1
+[DEBUG timecard] Card ocp1 is part of the PCI device /sys/devices/pci0000:00/0000:00:01.1/0000:02:00.0
+[INFO  timecard] Card ocp1 detected as Orolia ART Card rev. 6, PCI x4
+[INFO  timecard] Card ocp1 exposes PTP clock ptp2
+[INFO ] Will send statds metrics to 127.0.0.1:8125
+[DEBUG] ptp2: 23ns
+[DEBUG] ptp2: 3ns
+[DEBUG] ptp2: 21ns
+[DEBUG] ptp2: 30ns
+[DEBUG] ptp2: 13ns
+```
 
 ### Meta Timecard
 
