@@ -16,6 +16,7 @@ fn getClockID(fd: std.posix.fd_t) std.posix.clockid_t {
 
 const clock_getcaps: u32 = @truncate(linux.PTP_CLOCK_GETCAPS);
 const pin_getfunc: u32 = @truncate(linux.PTP_PIN_GETFUNC);
+const sys_offset_extended: u32 = @truncate(linux.PTP_SYS_OFFSET_EXTENDED);
 
 pub const pin_function_string = [_][]const u8{ "None", "ExternalTimeStamp", "PeriodicOutput", "PhysicalSynchronization" };
 
@@ -25,6 +26,7 @@ pub const PtpInfo = struct {
     name: []const u8,
     capabilities: linux.struct_ptp_clock_caps,
     pins: []linux.struct_ptp_pin_desc,
+    device: std.fs.File,
 
     pub fn init(alloc: Allocator, timecard_root: std.fs.Dir) !PtpInfo {
         var dir = timecard_root.openDir("ptp", .{}) catch |err| {
@@ -36,11 +38,10 @@ pub const PtpInfo = struct {
         const name = std.fs.path.basename(try dir.realpath(".", &buffer));
         var dev = try std.fs.openDirAbsolute("/dev", .{});
         defer dev.close();
-        var ptp_device = dev.openFile(name, .{}) catch |err| {
+        const ptp_device = dev.openFile(name, .{}) catch |err| {
             log.errAt(@src(), "Error opening /dev/{s}: {t}", .{ name, err });
             return err;
         };
-        defer ptp_device.close();
         //const clock_id = getClockID(ptp_device.handle);
         var caps: linux.struct_ptp_clock_caps = undefined;
         if (std.c.ioctl(ptp_device.handle, @bitCast(clock_getcaps), &caps) != 0)
@@ -57,10 +58,35 @@ pub const PtpInfo = struct {
             .name = try alloc.dupe(u8, name),
             .capabilities = caps,
             .pins = try pin_list.toOwnedSlice(alloc),
+            .device = ptp_device,
         };
     }
 
+    /// Returns the difference in nanosecond
+    fn diff(a: linux.struct_ptp_clock_time, b: linux.struct_ptp_clock_time) i64 {
+        return a.nsec - b.nsec + std.time.ns_per_s * (a.sec - b.nsec);
+    }
+
+    pub fn readOffset(self: *PtpInfo) !i64 {
+        var offset: linux.struct_ptp_sys_offset_extended = .{ .n_samples = 1 };
+        if (std.c.ioctl(self.device.handle, @bitCast(sys_offset_extended), &offset) != 0)
+            return error.FailedIoctl;
+        log.debug("sys offset extended: {} samples, clock {}", .{ offset.n_samples, offset.clockid });
+        for (0..1) |i| {
+            log.debug("[{}]  pre {any}", .{ i, offset.ts[i][0] });
+            log.debug("[{}]   ts {any}", .{ i, offset.ts[i][1] });
+            log.debug("[{}] post {any}", .{ i, offset.ts[i][2] });
+        }
+        const left = diff(offset.ts[0][1], offset.ts[0][0]);
+        const right = diff(offset.ts[0][2], offset.ts[0][1]);
+        if (left < 0 or right < 0) {
+            log.warnAt(@src(), "Non monotonic clock readings ! This might be due to an invalid ts_window_adjust value, set it to 0", .{});
+        }
+        return if (@abs(left) < @abs(right)) left else right;
+    }
+
     pub fn deinit(self: *PtpInfo, gpa: Allocator) void {
+        self.device.close();
         gpa.free(self.name);
         gpa.free(self.pins);
     }
