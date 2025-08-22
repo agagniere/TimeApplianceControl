@@ -1,17 +1,17 @@
 .{
     .name = .tapctl,
-    .version = "0.0.0",
+    .version = "0.0.1",
     .fingerprint = 0xabdaf4ed40b9db3e, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.15.0-dev.1380+e98aeeb73",
+    .minimum_zig_version = "0.15.1",
 
     .dependencies = .{
         .args = .{
-            .url = "git+https://github.com/ikskuh/zig-args?ref=master#49d7f38698e0a8362fb57c44fc2d38b359809d22",
-            .hash = "args-0.0.0-CiLiqlLSAAApbJcExQNqTNylC1IZrj6AEIRbbrvGH1vc",
+            .url = "git+https://github.com/ikskuh/zig-args?ref=master#8ae26b44a884ff20dca98ee84c098e8f8e94902f",
+            .hash = "args-0.0.0-CiLiqojRAACGzDRO7A9dw7kWSchNk29caJZkXuMCb0Cn",
         },
         .axe = .{
-            .url = "git+https://github.com/agagniere/axe?ref=master#ee00d9d2febaf2545379c2b078e7c50b5a0fd5a0",
-            .hash = "axe-0.7.0-M2JU5TmGAABMK_IXZhpP4cr30KxTRh0cBNtDgW8FABRT",
+            .url = "git+https://github.com/agagniere/axe?ref=master#61348215b22da08f21b5a45ca376f0c5e60850bb",
+            .hash = "axe-0.7.0-M2JU5XOIAAAAw_2zG1EierndhUfOHJSYQ2QOhh5fSghS",
         },
     },
     .paths = .{

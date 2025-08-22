@@ -34,8 +34,9 @@ const CommonOptions = struct {
         \\
         \\Commands:
     ++
-        "\n  info  " ++ InfoOptions.meta.full_text ++
-        "\n  mro   " ++ MroOptions.meta.full_text,
+        "\n  info     " ++ InfoOptions.meta.full_text ++
+        "\n  monitor  " ++ MonitorOptions.meta.full_text ++
+        "\n  mro      " ++ MroOptions.meta.full_text,
     .option_docs = .{
         .@"ocp-number" = "Specify the number of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/ocp<N>. Defaults to 0",
         .@"timecard-name" = "Specify the name of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/<NAME>. Overrides --ocp-number",
@@ -59,6 +60,24 @@ const MroOptions = struct {
     };
 };
 
+const MonitorOptions = struct {
+    @"statsd-address": []const u8 = "localhost",
+    @"statsd-port": u16 = 8125,
+
+    pub const shorthands = .{
+        .S = "statsd-address",
+        .s = "statsd-port",
+    };
+    pub const meta = .{
+        .usage_summary = "[-S ADDRESS] [-s PORT]",
+        .full_text = "Collect metrics from the clock and possibly the oscillator, pushed to statsd",
+        .option_docs = .{
+            .@"statsd-address" = "Specify which address to push statsd metrics to. Defaults to localhost",
+            .@"statsd-port" = "Specify which port to push statsd metrics to. Defaults to 8125",
+        },
+    };
+};
+
 const InfoOptions = struct {
     pub const meta = .{
         .full_text = "Dump all info collected about the time card as a single JSON object to standard output",
@@ -68,6 +87,7 @@ const InfoOptions = struct {
 const Verbs = union(enum) {
     mro: MroOptions,
     info: InfoOptions,
+    monitor: MonitorOptions,
 };
 
 const ParsedArgs = argsParser.ParseArgsResult(CommonOptions, Verbs);
@@ -96,6 +116,7 @@ pub fn main() !u8 {
     };
 
     try log.init(gpa, null, null);
+    defer log.deinit(gpa);
 
     // Output stream
     const out_buffer: []u8 = try gpa.alloc(u8, 4096);
@@ -107,10 +128,11 @@ pub fn main() !u8 {
     // CLI arguments
     const options: ParsedArgs = argsParser.parseWithVerbForCurrentProcess(CommonOptions, Verbs, gpa, .{ .forward = log_error }) catch return 1;
     defer options.deinit();
-    if (options.options.help or options.verb == null) {
+    if (options.options.help or (options.verb == null and !options.options.version)) {
         if (options.verb) |verb| {
             switch (verb) {
                 .mro => try argsParser.printHelp(MroOptions, build_info.name ++ " mro", output),
+                .monitor => try argsParser.printHelp(MonitorOptions, build_info.name ++ " monitor", output),
                 .info => {},
             }
         } else {
@@ -141,7 +163,40 @@ pub fn main() !u8 {
             const json = try timecard.to_json(arena.allocator());
             try output.print("{f}\n", .{std.json.fmt(json, .{})});
         },
+        .monitor => |monitor_options| try monitor(gpa, timecard, monitor_options),
         .mro => {},
     }
     return 0;
+}
+
+fn monitor(
+    gpa: std.mem.Allocator,
+    timecard: Timecard,
+    options: MonitorOptions,
+) !void {
+    _ = timecard;
+    var buffer: [512]u8 = undefined;
+    const socket_fd = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM | std.posix.SOCK.CLOEXEC, 0);
+    var statsd_fd: std.fs.File = .{ .handle = socket_fd };
+    var statsd = statsd_fd.writer(&buffer);
+    defer statsd.interface.flush() catch unreachable;
+    const addresses = try std.net.getAddressList(gpa, options.@"statsd-address", options.@"statsd-port");
+    defer addresses.deinit();
+
+    if (addresses.canon_name) |name| {
+        log.debug("Statsd canonical address: {s}", .{name});
+    }
+    for (addresses.addrs) |address| {
+        std.posix.connect(socket_fd, &address.any, address.getOsSockLen()) catch |err| {
+            log.warnAt(@src(), "{f}: {t}", .{ address, err });
+            continue;
+        };
+        log.info("Will send statds metrics to {f}", .{address});
+
+        try statsd.interface.print("foo:{}|c\n", .{1});
+        break;
+    } else {
+        log.errAt(@src(), "Failed to connect to {s}:{}", .{ options.@"statsd-address", options.@"statsd-port" });
+        return error.ConnexionFailed;
+    }
 }
