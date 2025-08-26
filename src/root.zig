@@ -103,8 +103,8 @@ pub const Timecard = struct {
     pci_info: PciInfo,
     ptp_info: PtpInfo,
     ios: []Connector,
-    clock_source: []const u8,
-    available_clock_sources: [][]const u8,
+    clock_source: ?[]const u8,
+    available_clock_sources: ?[][]const u8,
     available_input_formats: [][]const u8,
     available_output_formats: [][]const u8,
     pci_delay_compensation: u32,
@@ -141,10 +141,7 @@ pub const Timecard = struct {
         log.info("Card {s} exposes PTP clock {s}", .{ name, ptp_info.name });
 
         var buffer: [16]u8 = undefined;
-        const clock_source = dir.readFile("clock_source", &buffer) catch |err| {
-            log.errAt(@src(), "Expecting a file called 'clock_source' in {s}'s sysfs: {t}", .{ name, err });
-            return err;
-        };
+        const clock_source = dir.readFile("clock_source", &buffer) catch null;
 
         const pci_delay: i64 = try readIntegerFromFile("timecard's sysfs", i64, dir, "ts_window_adjust");
         if (pci_delay < std.math.minInt(u32) or pci_delay > std.math.maxInt(u32)) {
@@ -163,8 +160,8 @@ pub const Timecard = struct {
             .pci_info = pci_info,
             .ptp_info = ptp_info,
             .ios = try findConnectors(gpa, dir),
-            .clock_source = try gpa.dupe(u8, std.mem.trim(u8, clock_source, "\n")),
-            .available_clock_sources = try readListFromFile("timecard's sysfs", gpa, dir, "available_clock_sources"),
+            .clock_source = if (clock_source) |src| try gpa.dupe(u8, std.mem.trim(u8, src, "\n")) else null,
+            .available_clock_sources = readListFromFile("timecard's sysfs", gpa, dir, "available_clock_sources") catch null,
             .available_input_formats = try readListFromFile("timecard's sysfs", gpa, dir, "available_sma_inputs"),
             .available_output_formats = try readListFromFile("timecard's sysfs", gpa, dir, "available_sma_outputs"),
             .pci_delay_compensation = @truncate(@as(u64, @bitCast(pci_delay))),
@@ -176,7 +173,8 @@ pub const Timecard = struct {
         self.ptp_info.deinit(self.allocator);
         self.allocator.free(self.name);
         self.allocator.free(self.path);
-        self.allocator.free(self.clock_source);
+        if (self.clock_source) |source|
+            self.allocator.free(source);
 
         var ttys = self.serial_ports_name.iterator();
         while (ttys.next()) |tty| {
@@ -189,9 +187,11 @@ pub const Timecard = struct {
             io.deinit(self.allocator);
         }
         self.allocator.free(self.ios);
-        for (self.available_clock_sources) |s|
-            self.allocator.free(s);
-        self.allocator.free(self.available_clock_sources);
+        if (self.available_clock_sources) |sources| {
+            for (sources) |s|
+                self.allocator.free(s);
+            self.allocator.free(sources);
+        }
         for (self.available_input_formats) |s|
             self.allocator.free(s);
         self.allocator.free(self.available_input_formats);
@@ -210,7 +210,8 @@ pub const Timecard = struct {
             }
             try card.put("name", .{ .string = self.name });
             try card.put("path", .{ .string = self.path });
-            try card.put("clock_source", .{ .string = self.clock_source });
+            if (self.clock_source) |source|
+                try card.put("clock_source", .{ .string = source });
             try card.put("timestamp_window_adjustment", .{ .integer = self.pci_delay_compensation });
             {
                 var smas: std.json.Array = .init(arena);
@@ -225,10 +226,12 @@ pub const Timecard = struct {
             }
             {
                 var available: std.json.ObjectMap = .init(arena);
-                {
+                if (self.clock_source != null) {
                     var clocksrcs: std.json.Array = .init(arena);
-                    for (self.available_clock_sources) |clcksrc|
-                        try clocksrcs.append(.{ .string = clcksrc });
+                    if (self.available_clock_sources) |clock_sources| {
+                        for (clock_sources) |clcksrc|
+                            try clocksrcs.append(.{ .string = clcksrc });
+                    }
                     try available.put("clock_source", .{ .array = clocksrcs });
                 }
                 {
