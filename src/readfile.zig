@@ -21,18 +21,25 @@ pub fn readIntegerFromFile(
     };
 }
 
+const readListFromFileOptions = struct {
+    /// Used in logs to describe where a file is expected
+    location: []const u8,
+    /// Emit an error if not found
+    mandatory: bool = true,
+};
+
 /// Interpret the content of the file as a sequence of space-separated words
 pub fn readListFromFile(
-    /// Used in logs to describe where a file is expected
-    comptime location: []const u8,
     alloc: Allocator,
     dir: std.fs.Dir,
     filename: []const u8,
+    comptime log_options: readListFromFileOptions,
 ) ![][]const u8 {
     var result: std.ArrayListUnmanaged([]const u8) = .empty;
     var buffer: [512]u8 = undefined;
     const content = dir.readFile(filename, &buffer) catch |err| {
-        log.errAt(@src(), "A file called '{s}' is expected in " ++ location ++ ": {t}", .{ filename, err });
+        if (log_options.mandatory)
+            log.errAt(@src(), "A file called '{s}' is expected in " ++ log_options.location ++ ": {t}", .{ filename, err });
         return err;
     };
     var words = std.mem.tokenizeAny(u8, content, " \n");

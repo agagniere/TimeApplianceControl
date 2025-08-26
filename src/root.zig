@@ -161,9 +161,9 @@ pub const Timecard = struct {
             .ptp_info = ptp_info,
             .ios = try findConnectors(gpa, dir),
             .clock_source = if (clock_source) |src| try gpa.dupe(u8, std.mem.trim(u8, src, "\n")) else null,
-            .available_clock_sources = readListFromFile("timecard's sysfs", gpa, dir, "available_clock_sources") catch null,
-            .available_input_formats = try readListFromFile("timecard's sysfs", gpa, dir, "available_sma_inputs"),
-            .available_output_formats = try readListFromFile("timecard's sysfs", gpa, dir, "available_sma_outputs"),
+            .available_clock_sources = readListFromFile(gpa, dir, "available_clock_sources", .{ .location = "timecard's sysfs", .mandatory = false }) catch null,
+            .available_input_formats = try readListFromFile(gpa, dir, "available_sma_inputs", .{ .location = "timecard's sysfs" }),
+            .available_output_formats = try readListFromFile(gpa, dir, "available_sma_outputs", .{ .location = "timecard's sysfs" }),
             .pci_delay_compensation = @truncate(@as(u64, @bitCast(pci_delay))),
         };
     }
