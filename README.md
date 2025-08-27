@@ -81,51 +81,43 @@ Note that the parsing of the serial number failed, because the only such card I 
 This time using [yq](https://github.com/mikefarah/yq) to make the JSON output human-readable
 
 ```console
-# ./zig-out/bin/tapctl info --ocp-number 1 | yq -P
-[INFO ] Starting tapctl version 0.0.0, with timecard at /sys/class/timecard/ocp1
-[DEBUG timecard] Card ocp1 is part of the PCI device /sys/devices/pci0000:00/0000:00:01.1/0000:02:00.0
-[INFO  timecard] Card ocp1 detected as Orolia ART Card rev. 6, PCI x4
-[INFO  timecard] Card ocp1 exposes PTP clock ptp2
+# ./zig-out/bin/tapctl info --ocp-number 2 | yq -P
+[INFO ] Starting tapctl version 0.0.1, with timecard at /sys/class/timecard/ocp2
+[DEBUG timecard] Card ocp2 is part of the PCI device /sys/devices/pci0000:00/0000:00:1c.4/0000:06:00.0
+[INFO  timecard] Card ocp2 detected as Orolia ART Card rev. 6, PCI x4
+[INFO  timecard] Card ocp2 exposes PTP clock ptp2
 card:
-  serial_number: 210345
-  name: ocp1
-  path: /sys/class/timecard/ocp1
-  clock_source: NONE
+  serial_number: 240697
+  name: ocp2
+  path: /sys/class/timecard/ocp2
+  timestamp_window_adjustment: 261
   connectors:
     - name: sma4
       way: output
-      format: PHC
+      format: MAC
     - name: sma2
+      way: output
+      format: MAC
+    - name: sma3
       way: input
       format: PPS1
-    - name: sma3
-      way: output
-      format: GNSS
     - name: sma1
       way: output
-      format: 10Mhz
+      format: MAC
   available:
-    clock_source:
-      - NONE
-      - TOD
-      - IRIG
-      - PPS
-      - PTP
-      - RTC
-      - DCF
-      - REGS
-      - EXT
     formats:
       input:
         - PPS1
         - 10Mhz
       output:
-        - PHC
+        - MAC
         - GNSS
         - 10Mhz
 serial_ports:
-  GNSS: ttyS8
-  MAC: ttyS9
+  GNSS: ttyS12
+  NMEA: ttyS14
+  MAC: ttyS15
+  GNSS2: ttyS13
 ptp:
   name: ptp2
   capabilities:
@@ -137,23 +129,11 @@ ptp:
     periodic_output_signals: 5
     pps_callback: true
     cross_timestamping: false
-    phase_adjustment: true
+    phase_adjustment: false
     max_phase_adjustment:
       value: 0
       unit: ns
-  pins:
-    - name: sma1
-      function: None
-      channel: 0
-    - name: sma2
-      function: None
-      channel: 0
-    - name: sma3
-      function: None
-      channel: 0
-    - name: sma4
-      function: None
-      channel: 0
+  pins: []
 pci:
   vendor: Orolia
   device: ART Card
@@ -161,3 +141,4 @@ pci:
   max_speed: 2.5 GT/s PCIe
   max_width: 4
 ```
+(Note: A custom driver version was in use at that time)
