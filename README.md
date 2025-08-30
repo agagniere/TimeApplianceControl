@@ -44,6 +44,18 @@ Options:
 
 Note: Super user privilege is required to access `/dev/ptp<N>`
 
+### Quickly get a metrics graph
+
+Get a UI displaying metrics:
+```bash
+docker run --rm \
+	--name graphite \
+	--detach \
+	--publish 8080:80,8125:8125/udp \
+	docker.io/graphiteapp/graphite-statsd
+open http://localhost:8080
+```
+
 ### Monitor clock offset
 
 A measurement is done every 10 seconds

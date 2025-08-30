@@ -208,7 +208,7 @@ fn monitor(
 
     while (true) {
         const reading = try timecard.ptp_info.readOffset(true);
-        std.log.debug("{s}: {D}", .{ timecard.ptp_info.name, reading });
+        log.debug("{s}: {D}", .{ timecard.ptp_info.name, reading });
         try socket.print("{s}.offset:0|g\n{s}.offset:{}|g", .{ timecard.ptp_info.name, timecard.ptp_info.name, reading });
 
         try socket.flush();
