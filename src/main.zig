@@ -1,6 +1,7 @@
 const std = @import("std");
 const argsParser = @import("args");
 const tap = @import("tap");
+const cli = @import("cli.zig");
 
 const builtin = @import("builtin");
 const build_info = @import("build_info");
@@ -13,91 +14,7 @@ pub const std_options: std.Options = .{
     .log_level = .debug,
 };
 
-const CommonOptions = struct {
-    @"ocp-number": u8 = 0,
-    @"timecard-name": ?[]const u8 = null,
-    @"timecard-path": ?[]const u8 = null,
-    help: bool = false,
-    version: bool = false,
-    pub const wrap_len = 40;
-
-    pub const shorthands = .{
-        .N = "ocp-number",
-        .n = "timecard-name",
-        .P = "timecard-path",
-        .h = "help",
-        .v = "version",
-    };
-    pub const meta = .{
-        .usage_summary = "[-N NUMBER | -n NAME | -P PATH] [-h] [-v] COMMAND",
-        .full_text =
-        \\Control a time card from Open Compute Project's Time Appliance Project
-        \\
-        \\Commands:
-    ++
-        "\n  info     " ++ InfoOptions.meta.full_text ++
-        "\n  monitor  " ++ MonitorOptions.meta.full_text ++
-        "\n  mro      " ++ MroOptions.meta.full_text,
-    .option_docs = .{
-        .@"ocp-number" = "Specify the number of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/ocp<N>. Defaults to 0",
-        .@"timecard-name" = "Specify the name of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/<NAME>. Overrides --ocp-number",
-        .@"timecard-path" = "Specify the absolute path of the appliance's sysfs. Overrides --timecard-name and --ocp-number",
-        .help = "Display this usage message on standard output and exit successfully",
-        .version = "Show version information of the standard output and exit successfully",
-    },
-    };
-};
-
-const MroOptions = struct {
-    path: ?[]const u8 = null,
-
-    pub const shorthands = .{};
-    pub const meta = .{
-        .usage_summary = "[--path PATH]",
-        .full_text = "Interact with an mRO50",
-        .option_docs = .{
-            .path = "Specify a custom path to the MRO's serial port. By default, it is determined from the ttyMAC attribute of the timecard",
-        },
-    };
-};
-
-const MonitorOptions = struct {
-    @"statsd-address": []const u8 = "localhost",
-    @"statsd-port": u16 = 8125,
-
-    pub const shorthands = .{
-        .S = "statsd-address",
-        .s = "statsd-port",
-    };
-    pub const meta = .{
-        .usage_summary = "[-S ADDRESS] [-s PORT]",
-        .full_text = "Collect metrics from the clock and possibly the oscillator, pushed to statsd",
-        .option_docs = .{
-            .@"statsd-address" = "Specify which address to push statsd metrics to. Defaults to localhost",
-            .@"statsd-port" = "Specify which port to push statsd metrics to. Defaults to 8125",
-        },
-    };
-};
-
-const InfoOptions = struct {
-    pub const meta = .{
-        .full_text = "Dump all info collected about the time card as a single JSON object to standard output",
-    };
-};
-
-const Verbs = union(enum) {
-    mro: MroOptions,
-    info: InfoOptions,
-    monitor: MonitorOptions,
-};
-
-const ParsedArgs = argsParser.ParseArgsResult(CommonOptions, Verbs);
-
-fn log_error(err: argsParser.Error) !void {
-    log.scoped(.cli).err("{f}", .{err});
-}
-
-fn get_timecard_path(gpa: std.mem.Allocator, options: ParsedArgs) ![]const u8 {
+fn get_timecard_path(gpa: std.mem.Allocator, options: cli.ParsedArgs) ![]const u8 {
     if (options.options.@"timecard-path") |path| {
         return gpa.dupe(u8, path);
     }
@@ -126,25 +43,8 @@ pub fn main() !u8 {
     var output: *std.Io.Writer = &stdout.interface;
     defer output.flush() catch unreachable;
 
-    // CLI arguments
-    const options: ParsedArgs = argsParser.parseWithVerbForCurrentProcess(CommonOptions, Verbs, gpa, .{ .forward = log_error }) catch return 1;
+    const options: cli.ParsedArgs = (cli.parseCLI(gpa, output) catch return 1) orelse return 0;
     defer options.deinit();
-    if (options.options.help or (options.verb == null and !options.options.version)) {
-        if (options.verb) |verb| {
-            switch (verb) {
-                .mro => try argsParser.printHelp(MroOptions, build_info.name ++ " mro", output),
-                .monitor => try argsParser.printHelp(MonitorOptions, build_info.name ++ " monitor", output),
-                .info => {},
-            }
-        } else {
-            try argsParser.printHelp(CommonOptions, build_info.name, output);
-        }
-        return 0;
-    }
-    if (options.options.version) {
-        try output.writeAll(build_info.name ++ " version " ++ build_info.version ++ "\n");
-        return 0;
-    }
 
     const timecard_path = try get_timecard_path(gpa, options);
     defer gpa.free(timecard_path);
@@ -173,7 +73,7 @@ pub fn main() !u8 {
 fn start_monitoring(
     gpa: std.mem.Allocator,
     timecard: Timecard,
-    options: MonitorOptions,
+    options: cli.MonitorOptions,
 ) !void {
     var buffer: [2048]u8 = undefined;
     const udp_socket = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM | std.posix.SOCK.CLOEXEC, 0);
