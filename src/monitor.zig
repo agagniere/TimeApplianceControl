@@ -36,6 +36,63 @@ pub fn start_monitoring(
     }
 }
 
+const Mro50 = struct {
+    file: std.fs.File,
+    buffer: [64]u8 = undefined,
+    reader: std.fs.File.Reader,
+    writer: std.fs.File.Writer,
+
+    pub fn init(target: std.fs.File) Mro50 {
+        var result: Mro50 = .{
+            .file = target,
+            .reader = undefined,
+            .writer = undefined,
+        };
+        result.reader = result.file.reader(&result.buffer);
+        result.writer = result.file.writer(&.{});
+        return result;
+    }
+
+    pub fn deinit(self: Mro50) void {
+        self.file.close();
+    }
+
+    pub fn monitor(self: *Mro50) !Monitor {
+        try self.writer.interface.writeAll("monitor1\r");
+        const line = try self.reader.interface.takeDelimiterExclusive('\n');
+        if (line.len != 61 or line[line.len - 1] != '\r')
+            return error.UnexpectedFormat;
+
+        return .{
+            .line = line[0 .. line.len - 1],
+            .board_temperature = temperature(try fromHex(line[52..56]), 47e3),
+        };
+    }
+
+    const Monitor = struct {
+        line: []const u8,
+        board_temperature: f32,
+    };
+};
+
+fn fromHex(string: []u8) !f32 {
+    std.debug.assert(string.len == 4);
+    return @floatFromInt(try std.fmt.parseUnsigned(u16, string, 16));
+}
+
+fn resistance(raw: f32, factor: comptime_int) f32 {
+    const adc_max = 4095;
+    const x = raw / adc_max;
+    return factor * x / (1 - x);
+}
+
+fn temperature(raw: f32, factor: comptime_int) f32 {
+    const deg0 = 273.15;
+    const deg25 = 25 + deg0;
+    const A = 4100;
+    return A * deg25 / (deg25 * @log(1e-5 * resistance(raw, factor)) + A) - deg0;
+}
+
 fn monitor(
     gpa: Allocator,
     timecard: Timecard,
@@ -43,8 +100,8 @@ fn monitor(
 ) !void {
     _ = gpa;
 
-    var oscillator: ?std.fs.File = null;
-    defer if (oscillator) |f| f.close();
+    var oscillator: ?Mro50 = null;
+    defer if (oscillator) |*f| f.deinit();
 
     {
         var dev: std.fs.Dir = try std.fs.openDirAbsolute("/dev", .{});
@@ -62,7 +119,7 @@ fn monitor(
         if (timecard.serial_ports_name.get("MAC")) |port_name| {
             if (timecard.pci_info.device == .@"ART Card") {
                 log.debug("Monitoring MRO50 via /dev/{s}", .{port_name});
-                oscillator = try dev.openFile(port_name, .{ .mode = .read_write });
+                oscillator = .init(try dev.openFile(port_name, .{ .mode = .read_write }));
             }
         }
     }
@@ -72,24 +129,9 @@ fn monitor(
         log.debug("{s}: {D}", .{ timecard.ptp_info.name, reading });
         try socket.print("{s}.offset:0|g\n{s}.offset:{}|g\n", .{ timecard.ptp_info.name, timecard.ptp_info.name, reading });
 
-        if (oscillator) |osc| {
-            var buffer_in: [64]u8 = undefined;
-            var reader = osc.reader(&buffer_in);
-
-            var writer = osc.writer(&.{});
-            try writer.interface.writeAll("monitor1\r");
-
-            const line = std.mem.trim(u8, try reader.interface.takeDelimiterExclusive('\n'), "\n\r");
-            log.debug("> {s}", .{line});
-            if (line.len == 60) {
-                const hex = line[52..56];
-                const raw: f32 = @floatFromInt(try std.fmt.parseUnsigned(u16, hex, 16));
-                const x = 1 - raw / 4800;
-                const res = 10000 * x / (1 - x);
-                const temp = 4100 * 298.15 / (298.15 * @log(1e-5 * 4.7 * res) + 4100) - 273.15;
-                log.debug("mro temp: {}", .{temp});
-                try socket.print("mro50.board_temperature:{}|g\n", .{temp});
-            }
+        if (oscillator) |*mro| {
+            const mon = try mro.monitor();
+            try socket.print("mro50.board_temperature:{}|g\n", .{mon.board_temperature});
         }
 
         socket.flush() catch |err| log.errAt(@src(), "{t}", .{err});
