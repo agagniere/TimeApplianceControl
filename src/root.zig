@@ -1,11 +1,12 @@
 const std = @import("std");
 
-const readSerialNumber = @import("serialnumber.zig").readSerialNumber;
 pub const PciInfo = @import("pci.zig").PciInfo;
 const _ptp = @import("ptp.zig");
 pub const PtpInfo = _ptp.PtpInfo;
 pub const Log = @import("log.zig").config;
+pub const start_monitoring = @import("monitor.zig").start_monitoring;
 
+const readSerialNumber = @import("serialnumber.zig").readSerialNumber;
 const readfile = @import("readfile.zig");
 const readListFromFile = readfile.readListFromFile;
 const readIntegerFromFile = readfile.readIntegerFromFile;
