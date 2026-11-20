@@ -92,8 +92,13 @@ pub const PtpInfo = struct {
     }
 
     pub fn deinit(self: *PtpInfo, gpa: Allocator, io: std.Io) void {
-        self.device.close(io);
+        self.close(io);
         gpa.free(self.name);
         gpa.free(self.pins);
+    }
+
+    /// Release the device only, for when the memory is freed by other means
+    pub fn close(self: *PtpInfo, io: std.Io) void {
+        self.device.close(io);
     }
 };

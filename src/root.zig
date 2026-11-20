@@ -17,7 +17,7 @@ const NameMap = std.StringArrayHashMapUnmanaged([]const u8);
 const assert = std.debug.assert;
 
 /// Iterate through the tty folder and read each attribute
-fn getSerialPortsName(gpa: Allocator, io: std.Io, root: std.Io.Dir) !NameMap {
+fn getSerialPortsName(alloc: Allocator, io: std.Io, root: std.Io.Dir) !NameMap {
     var result: NameMap = .empty;
     var tty_dir = root.openDir(io, "tty", .{ .iterate = true }) catch |err| {
         switch (err) {
@@ -35,9 +35,9 @@ fn getSerialPortsName(gpa: Allocator, io: std.Io, root: std.Io.Dir) !NameMap {
         assert(std.mem.startsWith(u8, tty_file.name, "tty"));
         assert(tty_file.kind == .file);
         try result.put(
-            gpa,
-            try gpa.dupe(u8, tty_file.name[3..]),
-            try gpa.dupe(u8, try tty_dir.readFile(io, tty_file.name, &buffer)),
+            alloc,
+            try alloc.dupe(u8, tty_file.name[3..]),
+            try alloc.dupe(u8, try tty_dir.readFile(io, tty_file.name, &buffer)),
         );
     }
     return result;
@@ -101,7 +101,8 @@ fn relativeToRoot(path: []const u8) []const u8 {
 
 /// Time Appliance handle
 pub const Timecard = struct {
-    allocator: Allocator,
+    /// Owns all the memory of the fields, freed at once
+    arena: std.heap.ArenaAllocator,
     io: std.Io,
     name: []const u8,
     path: []const u8,
@@ -118,11 +119,14 @@ pub const Timecard = struct {
 
     /// `root` is the directory absolute paths are resolved from, `/` outside of tests
     pub fn fromPath(gpa: Allocator, io: std.Io, root: std.Io.Dir, path: []const u8) !Timecard {
+        var arena_state: std.heap.ArenaAllocator = .init(gpa);
+        errdefer arena_state.deinit();
+        const arena = arena_state.allocator();
+
         var dir = try root.openDir(io, relativeToRoot(path), .{ .iterate = true });
         defer dir.close(io);
 
-        const name = try gpa.dupe(u8, std.fs.path.basename(path));
-        errdefer gpa.free(name);
+        const name = try arena.dupe(u8, std.fs.path.basename(path));
 
         var pci_device = dir.openDir(io, "device", .{}) catch |err| {
             log.errAt(@src(), "Expected a 'device' folder in the sysfs of {s}: {t}", .{ name, err });
@@ -134,8 +138,7 @@ pub const Timecard = struct {
             log.debug("Card {s} is part of the PCI device {s}", .{ name, buffer[0..try pci_device.realPath(io, &buffer)] });
         }
 
-        var pci_info: PciInfo = try .fromDir(gpa, io, pci_device);
-        errdefer pci_info.deinit(gpa);
+        const pci_info: PciInfo = try .fromDir(arena, io, pci_device);
         log.info("Card {s} detected as {s} {s} rev. {}, PCI x{}", .{
             name,
             if (pci_info.vendor) |vendor| @tagName(vendor) else "(unknown vendor)",
@@ -144,8 +147,8 @@ pub const Timecard = struct {
             pci_info.max_width,
         });
 
-        var ptp_info: PtpInfo = try .init(gpa, io, root, dir);
-        errdefer ptp_info.deinit(gpa, io);
+        var ptp_info: PtpInfo = try .init(arena, io, root, dir);
+        errdefer ptp_info.close(io);
         log.info("Card {s} exposes PTP clock {s}", .{ name, ptp_info.name });
 
         var buffer: [16]u8 = undefined;
@@ -156,57 +159,33 @@ pub const Timecard = struct {
             log.errAt(@src(), "Timecard {s}'s timestamp window adjustement value {} doesn't fit in an u32. This is a known bug from linux 6.12 to 6.17. To fix: sudo bash -c 'echo 0 > {s}/ts_window_adjust'", .{ name, pci_delay, path });
         }
 
-        return .{
-            .allocator = gpa,
+        // Allocate everything before copying the arena into the result
+        var result: Timecard = .{
+            .arena = undefined,
             .io = io,
             .name = name,
-            .path = try gpa.dupe(u8, path),
+            .path = try arena.dupe(u8, path),
             .serialnumber = readSerialNumber(io, dir) catch |err| blk: {
                 log.errAt(@src(), "Unable to read serial number of {s}: {t}", .{ name, err });
                 break :blk null;
             },
-            .serial_ports_name = try getSerialPortsName(gpa, io, dir),
+            .serial_ports_name = try getSerialPortsName(arena, io, dir),
             .pci_info = pci_info,
             .ptp_info = ptp_info,
-            .ios = try findConnectors(gpa, io, dir),
-            .clock_source = if (clock_source) |src| try gpa.dupe(u8, std.mem.trim(u8, src, "\n")) else null,
-            .available_clock_sources = readListFromFile(gpa, io, dir, "available_clock_sources", .{ .location = "timecard's sysfs", .mandatory = false }) catch null,
-            .available_input_formats = try readListFromFile(gpa, io, dir, "available_sma_inputs", .{ .location = "timecard's sysfs" }),
-            .available_output_formats = try readListFromFile(gpa, io, dir, "available_sma_outputs", .{ .location = "timecard's sysfs" }),
+            .ios = try findConnectors(arena, io, dir),
+            .clock_source = if (clock_source) |src| try arena.dupe(u8, std.mem.trim(u8, src, "\n")) else null,
+            .available_clock_sources = readListFromFile(arena, io, dir, "available_clock_sources", .{ .location = "timecard's sysfs", .mandatory = false }) catch null,
+            .available_input_formats = try readListFromFile(arena, io, dir, "available_sma_inputs", .{ .location = "timecard's sysfs" }),
+            .available_output_formats = try readListFromFile(arena, io, dir, "available_sma_outputs", .{ .location = "timecard's sysfs" }),
             .pci_delay_compensation = @truncate(@as(u64, @bitCast(pci_delay))),
         };
+        result.arena = arena_state;
+        return result;
     }
 
     pub fn deinit(self: *Timecard) void {
-        self.pci_info.deinit(self.allocator);
-        self.ptp_info.deinit(self.allocator, self.io);
-        self.allocator.free(self.name);
-        self.allocator.free(self.path);
-        if (self.clock_source) |source|
-            self.allocator.free(source);
-
-        var ttys = self.serial_ports_name.iterator();
-        while (ttys.next()) |tty| {
-            self.allocator.free(tty.key_ptr.*);
-            self.allocator.free(tty.value_ptr.*);
-        }
-        self.serial_ports_name.deinit(self.allocator);
-
-        for (self.ios) |*io| {
-            io.deinit(self.allocator);
-        }
-        self.allocator.free(self.ios);
-        if (self.available_clock_sources) |sources| {
-            for (sources) |s|
-                self.allocator.free(s);
-            self.allocator.free(sources);
-        }
-        for (self.available_input_formats) |s|
-            self.allocator.free(s);
-        self.allocator.free(self.available_input_formats);
-        for (self.available_output_formats) |s|
-            self.allocator.free(s);
-        self.allocator.free(self.available_output_formats);
+        self.ptp_info.close(self.io);
+        self.arena.deinit();
     }
 
     pub fn to_json(self: Timecard, arena: Allocator) !std.json.Value {
