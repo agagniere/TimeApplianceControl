@@ -10,7 +10,7 @@ A command line interface for timecards of Open Compute's Time Appliance Project
 
 ## Requirement
 
-[Zig](https://ziglang.org/download/) version `0.15.1`
+[Zig](https://ziglang.org/download/) version `0.17.0`
 
 ## Usage
 

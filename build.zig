@@ -8,6 +8,11 @@ pub fn build(b: *std.Build) void {
 
     const argsParser = b.dependency("args", .{ .target = target, .optimize = optimize });
     const axe = b.dependency("axe", .{ .target = target, .optimize = optimize });
+    const ptp_clock = b.addTranslateC(.{
+        .root_source_file = b.addWriteFiles().add("ptp_clock.h", "#include <linux/ptp_clock.h>\n"),
+        .target = target,
+        .optimize = optimize,
+    });
 
     const mod = b.addModule(name, .{
         .root_source_file = b.path("src/root.zig"),
@@ -15,6 +20,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
         .imports = &.{
             .{ .name = "axe", .module = axe.module("axe") },
+            .{ .name = "ptp_clock", .module = ptp_clock.createModule() },
         },
     });
 
@@ -44,9 +50,7 @@ pub fn build(b: *std.Build) void {
         const run_cmd = b.addRunArtifact(exe);
         run_step.dependOn(&run_cmd.step);
         run_cmd.step.dependOn(b.getInstallStep());
-        if (b.args) |args| {
-            run_cmd.addArgs(args);
-        }
+        run_cmd.addPassthruArgs();
     }
     { // Test
         const test_step = b.step("test", "Run tests");

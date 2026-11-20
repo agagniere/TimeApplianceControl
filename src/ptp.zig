@@ -3,15 +3,13 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const log = @import("log.zig").config.scoped(.timecard);
 
-const linux = @cImport({
-    @cInclude("linux/ptp_clock.h");
-});
+const linux = @import("ptp_clock");
 
 /// Hmmmmmmmmmmm
 /// https://elixir.bootlin.com/linux/v6.14.11/source/tools/testing/selftests/ptp/testptp.c#L89
 fn getClockID(fd: std.posix.fd_t) std.posix.clockid_t {
     const hmm: u32 = @intCast(fd);
-    return @enumFromInt((~hmm << 3) | 3);
+    return @fromBackingInt(@intCast((~hmm << 3) | 3));
 }
 
 const clock_getcaps: u32 = @truncate(linux.PTP_CLOCK_GETCAPS);

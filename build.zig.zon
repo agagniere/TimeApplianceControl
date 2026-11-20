@@ -2,16 +2,16 @@
     .name = .tapctl,
     .version = "0.0.1",
     .fingerprint = 0xabdaf4ed40b9db3e, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
 
     .dependencies = .{
         .args = .{
-            .url = "git+https://github.com/ikskuh/zig-args?ref=master#f96f325f664d4ee2cd56a17ad135b331ecb65d98",
-            .hash = "args-0.0.0-CiLiqmvgAADyJmrzcQTP9IOYNvTzR_KGrg3ZNNsH2Qv0",
+            .url = "git+https://github.com/ikskuh/zig-args?ref=master#ad3c89ecdb2979b8b5d52b43b78e79bf51293235",
+            .hash = "args-0.0.0-CiLiqmHiAABlN6icC9sZHdp8HVplOXDxuUNz2VUY_K2X",
         },
         .axe = .{
-            .url = "git+https://github.com/Ratakor/axe?ref=0.8.0#cc9decec8a1ecf4020c19043292b08fcaea78cae",
-            .hash = "axe-0.8.0-M2JU5d2PAACr2-HEUrALBlax7tQ0DVAp9hVvEGdjK3bQ",
+            .url = "git+https://github.com/Ratakor/axe?ref=0.9.0#09773445415fa8fb0c8ebfc55e6d31de8d64c834",
+            .hash = "axe-0.9.0-M2JU5R6RAAA-iU1v8YHw3dSB8XMmnltmDT1aQJCTqlgp",
         },
     },
     .paths = .{
