@@ -93,6 +93,12 @@ fn findConnectors(alloc: Allocator, io: std.Io, dir: std.Io.Dir) ![]Connector {
     return result.toOwnedSlice(alloc);
 }
 
+/// Opening an absolute path ignores the directory it is opened from
+fn relativeToRoot(path: []const u8) []const u8 {
+    const relative = std.mem.trimStart(u8, path, "/");
+    return if (relative.len == 0) "." else relative;
+}
+
 /// Time Appliance handle
 pub const Timecard = struct {
     allocator: Allocator,
@@ -110,8 +116,9 @@ pub const Timecard = struct {
     available_output_formats: [][]const u8,
     pci_delay_compensation: u32,
 
-    pub fn fromPath(gpa: Allocator, io: std.Io, path: []const u8) !Timecard {
-        var dir = try std.Io.Dir.openDirAbsolute(io, path, .{ .iterate = true });
+    /// `root` is the directory absolute paths are resolved from, `/` outside of tests
+    pub fn fromPath(gpa: Allocator, io: std.Io, root: std.Io.Dir, path: []const u8) !Timecard {
+        var dir = try root.openDir(io, relativeToRoot(path), .{ .iterate = true });
         defer dir.close(io);
 
         const name = try gpa.dupe(u8, std.fs.path.basename(path));
@@ -137,7 +144,7 @@ pub const Timecard = struct {
             pci_info.max_width,
         });
 
-        var ptp_info: PtpInfo = try .init(gpa, io, dir);
+        var ptp_info: PtpInfo = try .init(gpa, io, root, dir);
         errdefer ptp_info.deinit(gpa, io);
         log.info("Card {s} exposes PTP clock {s}", .{ name, ptp_info.name });
 

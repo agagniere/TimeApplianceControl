@@ -16,6 +16,9 @@ const clock_getcaps: u32 = @truncate(linux.PTP_CLOCK_GETCAPS);
 const pin_getfunc: u32 = @truncate(linux.PTP_PIN_GETFUNC);
 const sys_offset_extended: u32 = @truncate(linux.PTP_SYS_OFFSET_EXTENDED);
 
+/// The test stand-in for linux/ptp_clock.h fakes the ioctls too
+const ioctl = if (@hasDecl(linux, "ioctl")) linux.ioctl else std.c.ioctl;
+
 pub const pin_function_string = [_][]const u8{ "None", "ExternalTimeStamp", "PeriodicOutput", "PhysicalSynchronization" };
 
 /// Collect info about the ptp clock
@@ -26,7 +29,7 @@ pub const PtpInfo = struct {
     pins: []linux.struct_ptp_pin_desc,
     device: std.Io.File,
 
-    pub fn init(alloc: Allocator, io: std.Io, timecard_root: std.Io.Dir) !PtpInfo {
+    pub fn init(alloc: Allocator, io: std.Io, root: std.Io.Dir, timecard_root: std.Io.Dir) !PtpInfo {
         var dir = timecard_root.openDir(io, "ptp", .{}) catch |err| {
             log.errAt(@src(), "Timecard sysfs expected to have a folder called 'ptp': {t}", .{err});
             return err;
@@ -34,7 +37,7 @@ pub const PtpInfo = struct {
         defer dir.close(io);
         var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const name = std.fs.path.basename(buffer[0..try dir.realPath(io, &buffer)]);
-        var dev = try std.Io.Dir.openDirAbsolute(io, "/dev", .{});
+        var dev = try root.openDir(io, "dev", .{});
         defer dev.close(io);
         const ptp_device = dev.openFile(io, name, .{}) catch |err| {
             log.errAt(@src(), "Error opening /dev/{s}: {t}", .{ name, err });
@@ -42,14 +45,14 @@ pub const PtpInfo = struct {
         };
         //const clock_id = getClockID(ptp_device.handle);
         var caps: linux.struct_ptp_clock_caps = undefined;
-        if (std.c.ioctl(ptp_device.handle, @bitCast(clock_getcaps), &caps) != 0)
+        if (ioctl(ptp_device.handle, @bitCast(clock_getcaps), &caps) != 0)
             return error.FailedIoctl;
         var pin_list: std.ArrayListUnmanaged(linux.struct_ptp_pin_desc) = try .initCapacity(alloc, @intCast(caps.n_pins));
         defer pin_list.deinit(alloc);
         for (0..@intCast(caps.n_pins)) |i| {
             const pin: *linux.struct_ptp_pin_desc = pin_list.addOneAssumeCapacity();
             pin.index = @intCast(i);
-            if (std.c.ioctl(ptp_device.handle, @bitCast(pin_getfunc), pin) != 0)
+            if (ioctl(ptp_device.handle, @bitCast(pin_getfunc), pin) != 0)
                 return error.FailedIoctl;
         }
         return .{
@@ -77,7 +80,7 @@ pub const PtpInfo = struct {
         tai: bool,
     ) !i64 {
         var readings: linux.struct_ptp_sys_offset_extended = .{ .n_samples = 1 };
-        if (std.c.ioctl(self.device.handle, @bitCast(sys_offset_extended), &readings) != 0)
+        if (ioctl(self.device.handle, @bitCast(sys_offset_extended), &readings) != 0)
             return error.FailedIoctl;
         const sys_window = diff(readings.ts[0][2], readings.ts[0][0]);
         if (sys_window < 0) {

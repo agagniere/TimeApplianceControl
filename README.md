@@ -16,7 +16,7 @@ A command line interface for timecards of Open Compute's Time Appliance Project
 
 ```console
 $ zig build run
-Usage: tapctl [-N NUMBER | -n NAME | -P PATH] [-h] [-v] COMMAND
+Usage: tapctl [-N NUMBER | -n NAME | -P PATH] [-r ROOT] [-h] [-v] COMMAND
 
 Control a time card from Open Compute Project's Time Appliance Project
 
@@ -34,6 +34,8 @@ Options:
                         Overrides --ocp-number
   -P, --timecard-path   Specify the absolute path of the appliance's sysfs.
                         Overrides --timecard-name and --ocp-number
+  -r, --root            Resolve all absolute paths (sysfs and /dev) relative
+                        to this directory, like chroot. Defaults to /
   -h, --help            Display this usage message on standard output and
                         exit successfully
   -v, --version         Show version information of the standard output

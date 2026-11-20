@@ -16,6 +16,7 @@ const CommonOptions = struct {
     @"ocp-number": u8 = 0,
     @"timecard-name": ?[]const u8 = null,
     @"timecard-path": ?[]const u8 = null,
+    root: []const u8 = "/",
     help: bool = false,
     version: bool = false,
     pub const wrap_len = 40;
@@ -24,11 +25,12 @@ const CommonOptions = struct {
         .N = "ocp-number",
         .n = "timecard-name",
         .P = "timecard-path",
+        .r = "root",
         .h = "help",
         .v = "version",
     };
     pub const meta = .{
-        .usage_summary = "[-N NUMBER | -n NAME | -P PATH] [-h] [-v] COMMAND",
+        .usage_summary = "[-N NUMBER | -n NAME | -P PATH] [-r ROOT] [-h] [-v] COMMAND",
         .full_text =
         \\Control a time card from Open Compute Project's Time Appliance Project
         \\
@@ -41,6 +43,7 @@ const CommonOptions = struct {
             .@"ocp-number" = "Specify the number of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/ocp<N>. Defaults to 0",
             .@"timecard-name" = "Specify the name of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/<NAME>. Overrides --ocp-number",
             .@"timecard-path" = "Specify the absolute path of the appliance's sysfs. Overrides --timecard-name and --ocp-number",
+            .root = "Resolve all absolute paths (sysfs and /dev) relative to this directory, like chroot. Defaults to /",
             .help = "Display this usage message on standard output and exit successfully",
             .version = "Show version information of the standard output and exit successfully",
         },
@@ -148,7 +151,13 @@ pub fn main(init: std.process.Init) !u8 {
         return 1;
     }
 
-    var timecard: Timecard = try .fromPath(gpa, io, timecard_path);
+    var root = std.Io.Dir.cwd().openDir(io, options.options.root, .{}) catch |err| {
+        log.errAt(@src(), "Unable to open root directory '{s}': {t}", .{ options.options.root, err });
+        return 1;
+    };
+    defer root.close(io);
+
+    var timecard: Timecard = try .fromPath(gpa, io, root, timecard_path);
     defer timecard.deinit();
 
     switch (options.verb.?) {
