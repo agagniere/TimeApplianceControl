@@ -19,7 +19,7 @@ zig build docs                    # emits docs to zig-out/docs
 zig test src/serialnumber.zig --test-filter parseSerialNumber   # single test, only for files that import nothing beyond std
 ```
 
-`zig build test` currently runs 0 tests. `root.zig` never references the test declarations of the files it imports, so `parseSerialNumber`'s test is only reached through `zig test src/serialnumber.zig`. The executable's own tests (src/main.zig) are commented out in `build.zig`.
+Zig only collects tests from files that a test block references. When you add a source file to the `tap` module, add it to the `test { _ = @import(...); }` block at the end of `src/root.zig`, or its tests are silently skipped. `zig build test` only compiles for a Linux target (see below). The executable's own tests (src/main.zig) are commented out in `build.zig`.
 
 The program only works on Linux with a real timecard present. It needs Linux ≥ 6.9 (the tty attributes are grouped in a `tty/` folder) and root access to open `/dev/ptp<N>`. It includes `linux/ptp_clock.h` and links libc, so it can't run on macOS. Cross-compile with `-Dtarget=x86_64-linux-gnu` (or `aarch64-linux-gnu`). On an Apple Silicon host, the resulting binary (or test binary from `.zig-cache/o/*/test`) can be run in an aarch64 Linux container. With a fake sysfs tree passed through `-P`, it gets as far as opening `/dev/ptpN`.
 

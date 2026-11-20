@@ -319,3 +319,11 @@ pub const Timecard = struct {
         return .{ .object = top };
     }
 };
+
+test {
+    _ = @import("log.zig");
+    _ = @import("pci.zig");
+    _ = @import("ptp.zig");
+    _ = @import("readfile.zig");
+    _ = @import("serialnumber.zig");
+}
