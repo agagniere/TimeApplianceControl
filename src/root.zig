@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const readSerialNumber = @import("serialnumber.zig").readSerialNumber;
+const parseSerialNumber = @import("serialnumber.zig").parseSerialNumber;
 pub const PciInfo = @import("pci.zig").PciInfo;
 const _ptp = @import("ptp.zig");
 pub const PtpInfo = _ptp.PtpInfo;
@@ -8,6 +8,7 @@ pub const Log = @import("log.zig").config;
 
 const readfile = @import("readfile.zig");
 const readFileFitting = readfile.readFileFitting;
+const max_attribute_size = readfile.max_attribute_size;
 const readListFromFile = readfile.readListFromFile;
 const readIntegerFromFile = readfile.readIntegerFromFile;
 
@@ -30,7 +31,7 @@ fn getSerialPortsName(alloc: Allocator, io: std.Io, root: std.Io.Dir) !NameMap {
         return err;
     };
     defer tty_dir.close(io);
-    var buffer: [32]u8 = undefined;
+    var buffer: [max_attribute_size]u8 = undefined;
     var ttys = tty_dir.iterate();
     while (try ttys.next(io)) |tty_file| {
         assert(std.mem.startsWith(u8, tty_file.name, "tty"));
@@ -52,7 +53,7 @@ const Connector = struct {
     pub const Way = enum { input, output };
 
     pub fn fromFile(alloc: Allocator, io: std.Io, parent: std.Io.Dir, filename: []const u8) !Connector {
-        var buffer: [32]u8 = undefined;
+        var buffer: [max_attribute_size]u8 = undefined;
         const content = try readFileFitting(io, parent, filename, &buffer);
         const comma = std.mem.findScalar(u8, content, ':');
         const way: ?Way = blk: {
@@ -92,6 +93,12 @@ fn findConnectors(alloc: Allocator, io: std.Io, dir: std.Io.Dir) ![]Connector {
         }
     }
     return result.toOwnedSlice(alloc);
+}
+
+fn readSerialNumber(io: std.Io, dir: std.Io.Dir) !u32 {
+    var buffer: [max_attribute_size]u8 = undefined;
+    const content = try readFileFitting(io, dir, "serialnum", &buffer);
+    return parseSerialNumber(std.mem.trimEnd(u8, content, "\n"));
 }
 
 /// Opening an absolute path ignores the directory it is opened from
@@ -152,7 +159,7 @@ pub const Timecard = struct {
         errdefer ptp_info.close(io);
         log.info("Card {s} exposes PTP clock {s}", .{ name, ptp_info.name });
 
-        var buffer: [16]u8 = undefined;
+        var buffer: [max_attribute_size]u8 = undefined;
         const clock_source = readFileFitting(io, dir, "clock_source", &buffer) catch null;
 
         const pci_delay: i64 = try readIntegerFromFile("timecard's sysfs", i64, io, dir, "ts_window_adjust");

@@ -2,6 +2,7 @@ const std = @import("std");
 const readfile = @import("readfile.zig");
 const readFileFitting = readfile.readFileFitting;
 const readFileInteger = readfile.readIntegerFromFile;
+const max_attribute_size = readfile.max_attribute_size;
 
 const Vendor = enum {
     Facebook,
@@ -45,7 +46,7 @@ pub const PciInfo = struct {
     max_width: u8,
 
     pub fn fromDir(alloc: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !PciInfo {
-        var buffer: [64]u8 = undefined;
+        var buffer: [max_attribute_size]u8 = undefined;
         const content = try readFileFitting(io, dir, "max_link_speed", &buffer);
         return .{
             .vendor = .fromID(try readFileInteger("PCI sysfs", u16, io, dir, "vendor")),

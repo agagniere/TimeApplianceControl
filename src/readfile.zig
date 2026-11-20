@@ -2,6 +2,10 @@ const std = @import("std");
 const log = @import("log.zig").config.scoped(.timecard);
 const Allocator = std.mem.Allocator;
 
+/// Size of a buffer that always holds a sysfs attribute entirely:
+/// sysfs never returns more than a page per attribute, whatever the driver does
+pub const max_attribute_size = std.heap.page_size_max;
+
 /// Read the whole file into `buffer`, failing instead of silently truncating a file that doesn't fit.
 /// The file has to be strictly smaller than `buffer`
 pub fn readFileFitting(io: std.Io, dir: std.Io.Dir, filename: []const u8, buffer: []u8) ![]u8 {
@@ -21,7 +25,7 @@ pub fn readIntegerFromFile(
     dir: std.Io.Dir,
     filename: []const u8,
 ) !T {
-    var buffer: [64]u8 = undefined;
+    var buffer: [max_attribute_size]u8 = undefined;
     const content = readFileFitting(io, dir, filename, &buffer) catch |err| {
         switch (err) {
             error.FileTooBig => log.errAt(@src(), "The file '{s}' in " ++ location ++ " is larger than expected", .{filename}),
@@ -51,7 +55,7 @@ pub fn readListFromFile(
     comptime log_options: readListFromFileOptions,
 ) ![][]const u8 {
     var result: std.ArrayList([]const u8) = .empty;
-    var buffer: [512]u8 = undefined;
+    var buffer: [max_attribute_size]u8 = undefined;
     const content = readFileFitting(io, dir, filename, &buffer) catch |err| {
         switch (err) {
             error.FileTooBig => log.errAt(@src(), "The file '{s}' in " ++ log_options.location ++ " is larger than expected", .{filename}),
