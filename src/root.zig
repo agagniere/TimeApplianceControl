@@ -7,6 +7,7 @@ pub const PtpInfo = _ptp.PtpInfo;
 pub const Log = @import("log.zig").config;
 
 const readfile = @import("readfile.zig");
+const readFileFitting = readfile.readFileFitting;
 const readListFromFile = readfile.readListFromFile;
 const readIntegerFromFile = readfile.readIntegerFromFile;
 
@@ -37,7 +38,7 @@ fn getSerialPortsName(alloc: Allocator, io: std.Io, root: std.Io.Dir) !NameMap {
         try result.put(
             alloc,
             try alloc.dupe(u8, tty_file.name[3..]),
-            try alloc.dupe(u8, try tty_dir.readFile(io, tty_file.name, &buffer)),
+            try alloc.dupe(u8, try readFileFitting(io, tty_dir, tty_file.name, &buffer)),
         );
     }
     return result;
@@ -52,7 +53,7 @@ const Connector = struct {
 
     pub fn fromFile(alloc: Allocator, io: std.Io, parent: std.Io.Dir, filename: []const u8) !Connector {
         var buffer: [32]u8 = undefined;
-        const content = try parent.readFile(io, filename, &buffer);
+        const content = try readFileFitting(io, parent, filename, &buffer);
         const comma = std.mem.findScalar(u8, content, ':');
         const way: ?Way = blk: {
             if (comma) |c| {
@@ -152,7 +153,7 @@ pub const Timecard = struct {
         log.info("Card {s} exposes PTP clock {s}", .{ name, ptp_info.name });
 
         var buffer: [16]u8 = undefined;
-        const clock_source = dir.readFile(io, "clock_source", &buffer) catch null;
+        const clock_source = readFileFitting(io, dir, "clock_source", &buffer) catch null;
 
         const pci_delay: i64 = try readIntegerFromFile("timecard's sysfs", i64, io, dir, "ts_window_adjust");
         if (pci_delay < std.math.minInt(u32) or pci_delay > std.math.maxInt(u32)) {

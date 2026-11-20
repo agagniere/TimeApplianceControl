@@ -1,5 +1,7 @@
 const std = @import("std");
-const readFileInteger = @import("readfile.zig").readIntegerFromFile;
+const readfile = @import("readfile.zig");
+const readFileFitting = readfile.readFileFitting;
+const readFileInteger = readfile.readIntegerFromFile;
 
 const Vendor = enum {
     Facebook,
@@ -44,7 +46,7 @@ pub const PciInfo = struct {
 
     pub fn fromDir(alloc: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !PciInfo {
         var buffer: [64]u8 = undefined;
-        const content = try dir.readFile(io, "max_link_speed", &buffer);
+        const content = try readFileFitting(io, dir, "max_link_speed", &buffer);
         return .{
             .vendor = .fromID(try readFileInteger("PCI sysfs", u16, io, dir, "vendor")),
             .device = .fromID(try readFileInteger("PCI sysfs", u16, io, dir, "device")),
