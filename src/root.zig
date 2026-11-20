@@ -167,7 +167,7 @@ pub const Timecard = struct {
 
         const pci_delay: i64 = try readIntegerFromFile("timecard's sysfs", i64, io, dir, "ts_window_adjust");
         if (pci_delay < std.math.minInt(u32) or pci_delay > std.math.maxInt(u32)) {
-            log.errAt(@src(), "Timecard {s}'s timestamp window adjustement value {} doesn't fit in an u32. This is a known bug from linux 6.12 to 6.17. To fix: sudo bash -c 'echo 0 > {s}/ts_window_adjust'", .{ name, pci_delay, path });
+            log.errAt(@src(), "Timecard {s}'s timestamp window adjustment value {} doesn't fit in an u32. This is a known bug of linux 6.12 to 7.2, fixed in 7.3 and backported to 6.12.y, 6.18.y and 7.2.y in October 2026. To fix: sudo bash -c 'echo 0 > {s}/ts_window_adjust'", .{ name, pci_delay, path });
         }
 
         // Allocate everything before copying the arena into the result
