@@ -65,34 +65,29 @@ pub fn build(b: *std.Build) void {
             },
         });
         const e2e_exe = addExecutable(b, name ++ "-e2e", target, optimize, e2e_mod, argsParser.module("args"), build_info);
-        const E2eCase = struct {
-            root: []const u8,
-            args: []const []const u8 = &.{},
-            exit_code: u8 = 0,
-            /// The failure is expected to be detected and reported
-            stderr_match: ?[]const u8 = null,
+        const cases = [_]struct { []const u8, E2eCase }{
+            .{ "test/fixtures/facebook", .{ .args = &.{ "--ocp-number", "0" } } },
+            .{ "test/fixtures/art", .{ .args = &.{ "--ocp-number", "2" } } },
+            .{ "test/failures/pci-delay-estimation", .{ .stderr_match = "value -3 doesn't fit in an u32" } },
+            .{ "test/failures/unflashed-eeprom", .{ .stderr_match = "Unable to read serial number of ocp0: InvalidCharacter" } },
+            .{ "test/failures/linux-6.8", .{ .exit_code = 1, .stderr_match = "only supports linux 6.9 and newer" } },
         };
-        const cases = [_]E2eCase{
-            .{ .root = "test/fixtures/facebook", .args = &.{ "--ocp-number", "0" } },
-            .{ .root = "test/fixtures/art", .args = &.{ "--ocp-number", "2" } },
-            .{ .root = "test/failures/pci-delay-estimation", .stderr_match = "value -3 doesn't fit in an u32" },
-            .{ .root = "test/failures/unflashed-eeprom", .stderr_match = "Unable to read serial number of ocp0: InvalidCharacter" },
-            .{ .root = "test/failures/linux-6.8", .exit_code = 1, .stderr_match = "only supports linux 6.9 and newer" },
-        };
-        for (cases) |case| {
-            const run = b.addRunArtifact(e2e_exe);
-            run.setName(b.fmt("e2e {s}", .{std.fs.path.basename(case.root)}));
-            run.addArg("--root");
-            run.addDirectoryArg(b.path(case.root));
-            run.addArgs(case.args);
-            run.addArg("info");
-            run.expectExitCode(case.exit_code);
-            if (case.stderr_match) |match|
-                run.expectStdErrMatch(match)
-            else
-                _ = run.captureStdErr(.{}); // Logs, rerun the command printed on failure to see them
-            run.has_side_effects = true; // The content of the fixture is not tracked by the cache
-            e2e_step.dependOn(&run.step);
+        for (cases) |case|
+            addE2eRun(b, e2e_step, e2e_exe, std.fs.path.basename(case[0]), b.path(case[0]), case[1]);
+
+        // Git doesn't store file permissions, so this root is generated. Root can open the device anyway
+        if (!isRoot()) {
+            const no_sudo = b.addRunArtifact(b.addExecutable(.{
+                .name = "no-sudo",
+                .root_module = b.createModule(.{
+                    .root_source_file = b.path("test/no-sudo.zig"),
+                    .target = b.graph.host,
+                }),
+            }));
+            no_sudo.addDirectoryArg(b.path("test/fixtures/facebook"));
+            no_sudo.addArg("ptp1");
+            const root = no_sudo.addOutputDirectoryArg("no-sudo");
+            addE2eRun(b, e2e_step, e2e_exe, "no-sudo", root, .{ .exit_code = 1, .stderr_match = "Reading the PTP clock requires root access, run tapctl with sudo" });
         }
         test_step.dependOn(e2e_step);
     }
@@ -109,6 +104,37 @@ pub fn build(b: *std.Build) void {
         });
         docs_step.dependOn(&install_docs.step);
     }
+}
+
+const E2eCase = struct {
+    args: []const []const u8 = &.{},
+    exit_code: u8 = 0,
+    /// The failure is expected to be detected and reported
+    stderr_match: ?[]const u8 = null,
+};
+
+fn addE2eRun(b: *std.Build, step: *std.Build.Step, exe: *std.Build.Step.Compile, case_name: []const u8, root: std.Build.LazyPath, case: E2eCase) void {
+    const run = b.addRunArtifact(exe);
+    run.setName(b.fmt("e2e {s}", .{case_name}));
+    run.addArg("--root");
+    run.addDirectoryArg(root);
+    run.addArgs(case.args);
+    run.addArg("info");
+    run.expectExitCode(case.exit_code);
+    if (case.stderr_match) |match|
+        run.expectStdErrMatch(match)
+    else
+        _ = run.captureStdErr(.{}); // Logs, rerun the command printed on failure to see them
+    run.has_side_effects = true; // The content of the fixture is not tracked by the cache
+    step.dependOn(&run.step);
+}
+
+fn isRoot() bool {
+    return switch (@import("builtin").os.tag) {
+        .linux => std.os.linux.geteuid() == 0,
+        .windows => false,
+        else => std.c.geteuid() == 0,
+    };
 }
 
 fn addExecutable(

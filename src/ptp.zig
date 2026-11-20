@@ -40,7 +40,10 @@ pub const PtpInfo = struct {
         var dev = try root.openDir(io, "dev", .{});
         defer dev.close(io);
         const ptp_device = dev.openFile(io, name, .{}) catch |err| {
-            log.errAt(@src(), "Error opening /dev/{s}: {t}", .{ name, err });
+            switch (err) {
+                error.AccessDenied, error.PermissionDenied => log.errAt(@src(), "Not allowed to open /dev/{s}: {t}. Reading the PTP clock requires root access, run tapctl with sudo", .{ name, err }),
+                else => log.errAt(@src(), "Error opening /dev/{s}: {t}", .{ name, err }),
+            }
             return err;
         };
         //const clock_id = getClockID(ptp_device.handle);
