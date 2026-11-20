@@ -8,8 +8,13 @@ pub fn build(b: *std.Build) void {
 
     const argsParser = b.dependency("args", .{ .target = target, .optimize = optimize });
     const axe = b.dependency("axe", .{ .target = target, .optimize = optimize });
-    const ptp_clock = b.addTranslateC(.{
+    // Non-Linux targets are not supported, a stand-in for linux/ptp_clock.h only allows running tests on a development machine
+    const ptp_clock = if (target.result.os.tag == .linux) b.addTranslateC(.{
         .root_source_file = b.addWriteFiles().add("ptp_clock.h", "#include <linux/ptp_clock.h>\n"),
+        .target = target,
+        .optimize = optimize,
+    }).createModule() else b.createModule(.{
+        .root_source_file = b.path("test/port.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -20,7 +25,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
         .imports = &.{
             .{ .name = "axe", .module = axe.module("axe") },
-            .{ .name = "ptp_clock", .module = ptp_clock.createModule() },
+            .{ .name = "ptp_clock", .module = ptp_clock },
         },
     });
 
