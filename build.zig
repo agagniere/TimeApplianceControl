@@ -54,7 +54,7 @@ pub fn build(b: *std.Build) void {
         //test_step.dependOn(&run_exe_tests.step);
 
         // End-to-end: run on fake timecards, with the PTP ioctls answered by the stand-in, whatever the target
-        const e2e_step = b.step("e2e", "Run end-to-end tests on the fake timecards of test/fixtures");
+        const e2e_step = b.step("e2e", "Run end-to-end tests on the fake timecards of test/fixtures and test/failures");
         const e2e_mod = b.createModule(.{
             .root_source_file = b.path("src/root.zig"),
             .target = target,
@@ -65,20 +65,32 @@ pub fn build(b: *std.Build) void {
             },
         });
         const e2e_exe = addExecutable(b, name ++ "-e2e", target, optimize, e2e_mod, argsParser.module("args"), build_info);
-        const fixtures = [_]struct { []const u8, []const []const u8 }{
-            .{ "facebook", &.{ "--ocp-number", "0" } },
-            .{ "art", &.{ "--ocp-number", "2" } },
+        const E2eCase = struct {
+            root: []const u8,
+            args: []const []const u8 = &.{},
+            exit_code: u8 = 0,
+            /// The failure is expected to be detected and reported
+            stderr_match: ?[]const u8 = null,
         };
-        for (fixtures) |fixture| {
-            const fixture_name, const args = fixture;
+        const cases = [_]E2eCase{
+            .{ .root = "test/fixtures/facebook", .args = &.{ "--ocp-number", "0" } },
+            .{ .root = "test/fixtures/art", .args = &.{ "--ocp-number", "2" } },
+            .{ .root = "test/failures/pci-delay-estimation", .stderr_match = "value -3 doesn't fit in an u32" },
+            .{ .root = "test/failures/unflashed-eeprom", .stderr_match = "Unable to read serial number of ocp0: InvalidCharacter" },
+            .{ .root = "test/failures/linux-6.8", .exit_code = 1, .stderr_match = "only supports linux 6.9 and newer" },
+        };
+        for (cases) |case| {
             const run = b.addRunArtifact(e2e_exe);
-            run.setName(b.fmt("e2e {s}", .{fixture_name}));
+            run.setName(b.fmt("e2e {s}", .{std.fs.path.basename(case.root)}));
             run.addArg("--root");
-            run.addDirectoryArg(b.path(b.fmt("test/fixtures/{s}", .{fixture_name})));
-            run.addArgs(args);
+            run.addDirectoryArg(b.path(case.root));
+            run.addArgs(case.args);
             run.addArg("info");
-            run.expectExitCode(0);
-            _ = run.captureStdErr(.{}); // Logs, rerun the command printed on failure to see them
+            run.expectExitCode(case.exit_code);
+            if (case.stderr_match) |match|
+                run.expectStdErrMatch(match)
+            else
+                _ = run.captureStdErr(.{}); // Logs, rerun the command printed on failure to see them
             run.has_side_effects = true; // The content of the fixture is not tracked by the cache
             e2e_step.dependOn(&run.step);
         }

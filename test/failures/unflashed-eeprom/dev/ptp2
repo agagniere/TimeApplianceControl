@@ -1,0 +1,8 @@
+.{
+    .capabilities = .{
+        .max_adj = 100000000,
+        .n_ext_ts = 6,
+        .n_per_out = 5,
+        .pps = 1,
+    },
+}

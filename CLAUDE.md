@@ -15,7 +15,7 @@ zig build                         # builds zig-out/bin/tapctl (Debug)
 zig build --release               # ReleaseSafe (preferred_optimize_mode)
 zig build run -- info -N 1        # run with args
 zig build test                    # unit tests of the `tap` library module (src/root.zig), then e2e
-zig build e2e                     # end-to-end: `tapctl --root test/fixtures/<card> info` must exit 0
+zig build e2e                     # end-to-end: `tapctl --root <fake root> info` on test/fixtures and test/failures
 zig build docs                    # emits docs to zig-out/docs
 zig test src/serialnumber.zig --test-filter parseSerialNumber   # single test, only for files that import nothing beyond std
 ```
@@ -32,7 +32,8 @@ The program only works on Linux with a real timecard present. It needs Linux ≥
 - **`src/pci.zig`**: maps PCI vendor and device IDs to enums. Their `@tagName`s are the display strings, hence names like `@"ART Card"`.
 - **`src/readfile.zig`**: helpers for reading sysfs attributes (an integer, or a space-separated list) that log a descriptive error on failure. Pass `.mandatory = false` for optional attributes so no error gets logged.
 - **`src/log.zig`**: configures logging with the upstream `axe` library (Ratakor/axe, pinned by release tag). The exe installs it as `std_options.logFn`. Modules use `Log.scoped(.timecard)`, and use `log.errAt(@src(), ...)` / `warnAt` to include the source location.
-- **`test/fixtures/<card>/`**: fake roots for `--root`, modeled on real cards. Each has a `sys/` tree laid out like real sysfs (`class/timecard/ocpN` and the `device`/`ptp` links are relative symlinks into `devices/pci...`) and `dev/ptpN` as a ZON description of the clock's capabilities and pins. Sysfs attributes end with a newline, except the `tty/` ones, as the driver emits them. To add a fixture, also list it in the `fixtures` array in `build.zig`.
+- **`test/fixtures/<card>/`**: fake roots for `--root`, modeled on real cards. Each has a `sys/` tree laid out like real sysfs (`class/timecard/ocpN` and the `device`/`ptp` links are relative symlinks into `devices/pci...`) and `dev/ptpN` as a ZON description of the clock's capabilities and pins. Sysfs attributes end with a newline, except the `tty/` ones, as the driver emits them. To add a fixture, also list it in the `cases` array in `build.zig`, where it must exit 0.
+- **`test/failures/<name>/`**: fake roots reproducing one known problem each, copied from the ART fixture with its timecard renamed `ocp0` (so no `--ocp-number` is needed) and a single change: `pci-delay-estimation` (the `ts_window_adjust` driver bug), `unflashed-eeprom` (serial number bytes that aren't ASCII digits), `linux-6.8` (tty symlinks instead of the `tty/` folder). Their `cases` entry expects an exit code and a stderr substring proving tapctl reported the problem. When generating such trees, build paths relative to the repo and check they stay inside it: they mirror `/sys` and `/dev`, so an empty prefix would target the real root filesystem.
 
 ## Conventions
 
