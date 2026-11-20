@@ -7,11 +7,12 @@ pub fn readIntegerFromFile(
     /// Used in logs to describe where a file is expected
     comptime location: []const u8,
     T: type,
-    dir: std.fs.Dir,
+    io: std.Io,
+    dir: std.Io.Dir,
     filename: []const u8,
 ) !T {
     var buffer: [64]u8 = undefined;
-    const content = dir.readFile(filename, &buffer) catch |err| {
+    const content = dir.readFile(io, filename, &buffer) catch |err| {
         log.errAt(@src(), location ++ " is expected to contain a file called '{s}': {t}", .{ filename, err });
         return err;
     };
@@ -31,13 +32,14 @@ const readListFromFileOptions = struct {
 /// Interpret the content of the file as a sequence of space-separated words
 pub fn readListFromFile(
     alloc: Allocator,
-    dir: std.fs.Dir,
+    io: std.Io,
+    dir: std.Io.Dir,
     filename: []const u8,
     comptime log_options: readListFromFileOptions,
 ) ![][]const u8 {
     var result: std.ArrayListUnmanaged([]const u8) = .empty;
     var buffer: [512]u8 = undefined;
-    const content = dir.readFile(filename, &buffer) catch |err| {
+    const content = dir.readFile(io, filename, &buffer) catch |err| {
         if (log_options.mandatory)
             log.errAt(@src(), "A file called '{s}' is expected in " ++ log_options.location ++ ": {t}", .{ filename, err });
         return err;

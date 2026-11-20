@@ -26,19 +26,19 @@ pub const PtpInfo = struct {
     name: []const u8,
     capabilities: linux.struct_ptp_clock_caps,
     pins: []linux.struct_ptp_pin_desc,
-    device: std.fs.File,
+    device: std.Io.File,
 
-    pub fn init(alloc: Allocator, timecard_root: std.fs.Dir) !PtpInfo {
-        var dir = timecard_root.openDir("ptp", .{}) catch |err| {
+    pub fn init(alloc: Allocator, io: std.Io, timecard_root: std.Io.Dir) !PtpInfo {
+        var dir = timecard_root.openDir(io, "ptp", .{}) catch |err| {
             log.errAt(@src(), "Timecard sysfs expected to have a folder called 'ptp': {t}", .{err});
             return err;
         };
-        defer dir.close();
-        var buffer: [std.fs.max_path_bytes]u8 = undefined;
-        const name = std.fs.path.basename(try dir.realpath(".", &buffer));
-        var dev = try std.fs.openDirAbsolute("/dev", .{});
-        defer dev.close();
-        const ptp_device = dev.openFile(name, .{}) catch |err| {
+        defer dir.close(io);
+        var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const name = std.fs.path.basename(buffer[0..try dir.realPath(io, &buffer)]);
+        var dev = try std.Io.Dir.openDirAbsolute(io, "/dev", .{});
+        defer dev.close(io);
+        const ptp_device = dev.openFile(io, name, .{}) catch |err| {
             log.errAt(@src(), "Error opening /dev/{s}: {t}", .{ name, err });
             return err;
         };
@@ -90,8 +90,8 @@ pub const PtpInfo = struct {
         return diff(readings.ts[0][1], readings.ts[0][0]) - @divTrunc(sys_window, 2) + offset;
     }
 
-    pub fn deinit(self: *PtpInfo, gpa: Allocator) void {
-        self.device.close();
+    pub fn deinit(self: *PtpInfo, gpa: Allocator, io: std.Io) void {
+        self.device.close(io);
         gpa.free(self.name);
         gpa.free(self.pins);
     }

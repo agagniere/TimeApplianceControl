@@ -1,11 +1,11 @@
 const std = @import("std");
 
-const Dir = std.fs.Dir;
+const Dir = std.Io.Dir;
 
 /// Read the attribute exposed by the driver
-pub fn readSerialNumber(root: Dir) !u32 {
+pub fn readSerialNumber(io: std.Io, root: Dir) !u32 {
     var buffer: [6 * 2 + 5]u8 = undefined;
-    const raw = try root.readFile("serialnum", &buffer);
+    const raw = try root.readFile(io, "serialnum", &buffer);
     std.debug.assert(raw.len == buffer.len);
     return parseSerialNumber(raw);
 }

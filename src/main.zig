@@ -2,7 +2,6 @@ const std = @import("std");
 const argsParser = @import("args");
 const tap = @import("tap");
 
-const builtin = @import("builtin");
 const build_info = @import("build_info");
 
 const log = tap.Log;
@@ -34,17 +33,17 @@ const CommonOptions = struct {
         \\Control a time card from Open Compute Project's Time Appliance Project
         \\
         \\Commands:
-    ++
-        "\n  info     " ++ InfoOptions.meta.full_text ++
-        "\n  monitor  " ++ MonitorOptions.meta.full_text ++
-        "\n  mro      " ++ MroOptions.meta.full_text,
-    .option_docs = .{
-        .@"ocp-number" = "Specify the number of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/ocp<N>. Defaults to 0",
-        .@"timecard-name" = "Specify the name of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/<NAME>. Overrides --ocp-number",
-        .@"timecard-path" = "Specify the absolute path of the appliance's sysfs. Overrides --timecard-name and --ocp-number",
-        .help = "Display this usage message on standard output and exit successfully",
-        .version = "Show version information of the standard output and exit successfully",
-    },
+        ++
+            "\n  info     " ++ InfoOptions.meta.full_text ++
+            "\n  monitor  " ++ MonitorOptions.meta.full_text ++
+            "\n  mro      " ++ MroOptions.meta.full_text,
+        .option_docs = .{
+            .@"ocp-number" = "Specify the number of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/ocp<N>. Defaults to 0",
+            .@"timecard-name" = "Specify the name of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/<NAME>. Overrides --ocp-number",
+            .@"timecard-path" = "Specify the absolute path of the appliance's sysfs. Overrides --timecard-name and --ocp-number",
+            .help = "Display this usage message on standard output and exit successfully",
+            .version = "Show version information of the standard output and exit successfully",
+        },
     };
 };
 
@@ -107,27 +106,22 @@ fn get_timecard_path(gpa: std.mem.Allocator, options: ParsedArgs) ![]const u8 {
     return std.fmt.allocPrint(gpa, "/sys/class/timecard/ocp{}", .{options.options.@"ocp-number"});
 }
 
-pub fn main() !u8 {
-    // Allocator
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = debug_allocator.deinit();
-    const gpa = switch (builtin.mode) {
-        .Debug, .ReleaseSafe => debug_allocator.allocator(),
-        .ReleaseFast, .ReleaseSmall => std.heap.smp_allocator,
-    };
+pub fn main(init: std.process.Init) !u8 {
+    const io = init.io;
+    const gpa = init.gpa;
 
-    try log.init(gpa, null, null);
-    defer log.deinit(gpa);
+    try log.init(io, null, init.environ_map);
+    defer log.deinit();
 
     // Output stream
     const out_buffer: []u8 = try gpa.alloc(u8, 4096);
     defer gpa.free(out_buffer);
-    var stdout: std.fs.File.Writer = std.fs.File.stdout().writer(out_buffer);
+    var stdout: std.Io.File.Writer = std.Io.File.stdout().writer(io, out_buffer);
     var output: *std.Io.Writer = &stdout.interface;
     defer output.flush() catch unreachable;
 
     // CLI arguments
-    const options: ParsedArgs = argsParser.parseWithVerbForCurrentProcess(CommonOptions, Verbs, gpa, .{ .forward = log_error }) catch return 1;
+    const options: ParsedArgs = argsParser.parseWithVerbForCurrentProcess(CommonOptions, Verbs, init, .{ .forward = log_error }) catch return 1;
     defer options.deinit();
     if (options.options.help or (options.verb == null and !options.options.version)) {
         if (options.verb) |verb| {
@@ -154,7 +148,7 @@ pub fn main() !u8 {
         return 1;
     }
 
-    var timecard: Timecard = try .fromPath(gpa, timecard_path);
+    var timecard: Timecard = try .fromPath(gpa, io, timecard_path);
     defer timecard.deinit();
 
     switch (options.verb.?) {
@@ -164,55 +158,60 @@ pub fn main() !u8 {
             const json = try timecard.to_json(arena.allocator());
             try output.print("{f}\n", .{std.json.fmt(json, .{})});
         },
-        .monitor => |monitor_options| try start_monitoring(gpa, timecard, monitor_options),
+        .monitor => |monitor_options| try start_monitoring(io, timecard, monitor_options),
         .mro => {},
     }
     return 0;
 }
 
 fn start_monitoring(
-    gpa: std.mem.Allocator,
+    io: std.Io,
     timecard: Timecard,
     options: MonitorOptions,
 ) !void {
+    const HostName = std.Io.net.HostName;
     var buffer: [2048]u8 = undefined;
-    const udp_socket = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM | std.posix.SOCK.CLOEXEC, 0);
-    var statsd_file: std.fs.File = .{ .handle = udp_socket };
-    var statsd_writer = statsd_file.writer(&buffer);
-    const addresses = try std.net.getAddressList(gpa, options.@"statsd-address", options.@"statsd-port");
-    defer addresses.deinit();
+    var canonical_name_buffer: [HostName.max_len]u8 = undefined;
+    var lookup_buffer: [16]HostName.LookupResult = undefined;
+    var lookup_queue: std.Io.Queue(HostName.LookupResult) = .init(&lookup_buffer);
+    const host_name: HostName = try .init(options.@"statsd-address");
+    try host_name.lookup(io, &lookup_queue, .{
+        .port = options.@"statsd-port",
+        .canonical_name_buffer = &canonical_name_buffer,
+    });
 
-    if (addresses.canon_name) |name| {
-        log.debug("Statsd canonical address: {s}", .{name});
+    while (lookup_queue.getOne(io)) |result| switch (result) {
+        .canonical_name => |name| log.debug("Statsd canonical address: {s}", .{name.bytes}),
+        .address => |address| {
+            const statsd = address.connect(io, .{ .mode = .dgram }) catch |err| {
+                log.warnAt(@src(), "{f}: {t}", .{ address, err });
+                continue;
+            };
+            defer statsd.close(io);
+            var statsd_writer = statsd.writer(io, &buffer);
+            log.info("Will send statds metrics to {f}", .{address});
+            return monitor(io, timecard, &statsd_writer.interface);
+        },
+    } else |err| switch (err) {
+        error.Canceled => |e| return e,
+        error.Closed => {},
     }
-    for (addresses.addrs) |address| {
-        std.posix.connect(udp_socket, &address.any, address.getOsSockLen()) catch |err| {
-            log.warnAt(@src(), "{f}: {t}", .{ address, err });
-            continue;
-        };
-        log.info("Will send statds metrics to {f}", .{address});
-        try monitor(gpa, timecard, &statsd_writer.interface);
-        break;
-    } else {
-        log.errAt(@src(), "Failed to connect to {s}:{}", .{ options.@"statsd-address", options.@"statsd-port" });
-        return error.ConnexionFailed;
-    }
+    log.errAt(@src(), "Failed to connect to {s}:{}", .{ options.@"statsd-address", options.@"statsd-port" });
+    return error.ConnexionFailed;
 }
 
 fn monitor(
-    gpa: std.mem.Allocator,
+    io: std.Io,
     timecard: Timecard,
     socket: *std.Io.Writer,
 ) !void {
-    _ = gpa;
-
     while (true) {
         const reading = try timecard.ptp_info.readOffset(true);
-        std.log.debug("{s}: {D}", .{ timecard.ptp_info.name, reading });
+        std.log.debug("{s}: {f}", .{ timecard.ptp_info.name, std.Io.Duration.fromNanoseconds(reading) });
         try socket.print("{s}.offset:0|g\n{s}.offset:{}|g", .{ timecard.ptp_info.name, timecard.ptp_info.name, reading });
 
         try socket.flush();
 
-        std.Thread.sleep(10 * std.time.ns_per_s);
+        try io.sleep(.fromSeconds(10), .awake);
     }
 }

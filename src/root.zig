@@ -17,9 +17,9 @@ const NameMap = std.StringArrayHashMapUnmanaged([]const u8);
 const assert = std.debug.assert;
 
 /// Iterate through the tty folder and read each attribute
-fn getSerialPortsName(gpa: Allocator, root: std.fs.Dir) !NameMap {
+fn getSerialPortsName(gpa: Allocator, io: std.Io, root: std.Io.Dir) !NameMap {
     var result: NameMap = .empty;
-    var tty_dir = root.openDir("tty", .{ .iterate = true }) catch |err| {
+    var tty_dir = root.openDir(io, "tty", .{ .iterate = true }) catch |err| {
         switch (err) {
             error.FileNotFound => {
                 log.errAt(@src(), "This program only supports linux 6.9 and newer, where the driver groups the ttys read-only attributes in a folder", .{});
@@ -28,16 +28,16 @@ fn getSerialPortsName(gpa: Allocator, root: std.fs.Dir) !NameMap {
         }
         return err;
     };
-    defer tty_dir.close();
+    defer tty_dir.close(io);
     var buffer: [32]u8 = undefined;
     var ttys = tty_dir.iterate();
-    while (try ttys.next()) |tty_file| {
+    while (try ttys.next(io)) |tty_file| {
         assert(std.mem.startsWith(u8, tty_file.name, "tty"));
         assert(tty_file.kind == .file);
         try result.put(
             gpa,
             try gpa.dupe(u8, tty_file.name[3..]),
-            try gpa.dupe(u8, try tty_dir.readFile(tty_file.name, &buffer)),
+            try gpa.dupe(u8, try tty_dir.readFile(io, tty_file.name, &buffer)),
         );
     }
     return result;
@@ -50,9 +50,9 @@ const Connector = struct {
 
     pub const Way = enum { input, output };
 
-    pub fn fromFile(alloc: Allocator, parent: std.fs.Dir, filename: []const u8) !Connector {
+    pub fn fromFile(alloc: Allocator, io: std.Io, parent: std.Io.Dir, filename: []const u8) !Connector {
         var buffer: [32]u8 = undefined;
-        const content = try parent.readFile(filename, &buffer);
+        const content = try parent.readFile(io, filename, &buffer);
         const comma = std.mem.indexOfScalar(u8, content, ':');
         const way: ?Way = blk: {
             if (comma) |c| {
@@ -82,12 +82,12 @@ const Connector = struct {
     }
 };
 
-fn findConnectors(alloc: Allocator, dir: std.fs.Dir) ![]Connector {
+fn findConnectors(alloc: Allocator, io: std.Io, dir: std.Io.Dir) ![]Connector {
     var result: std.ArrayListUnmanaged(Connector) = .empty;
     var files = dir.iterate();
-    while (try files.next()) |file| {
+    while (try files.next(io)) |file| {
         if (std.mem.startsWith(u8, file.name, "sma")) {
-            try result.append(alloc, try .fromFile(alloc, dir, file.name));
+            try result.append(alloc, try .fromFile(alloc, io, dir, file.name));
         }
     }
     return result.toOwnedSlice(alloc);
@@ -96,6 +96,7 @@ fn findConnectors(alloc: Allocator, dir: std.fs.Dir) ![]Connector {
 /// Time Appliance handle
 pub const Timecard = struct {
     allocator: Allocator,
+    io: std.Io,
     name: []const u8,
     path: []const u8,
     serialnumber: ?u32,
@@ -109,24 +110,24 @@ pub const Timecard = struct {
     available_output_formats: [][]const u8,
     pci_delay_compensation: u32,
 
-    pub fn fromPath(gpa: Allocator, path: []const u8) !Timecard {
-        var dir = try std.fs.openDirAbsolute(path, .{ .iterate = true });
-        defer dir.close();
+    pub fn fromPath(gpa: Allocator, io: std.Io, path: []const u8) !Timecard {
+        var dir = try std.Io.Dir.openDirAbsolute(io, path, .{ .iterate = true });
+        defer dir.close(io);
 
         const name = try gpa.dupe(u8, std.fs.path.basename(path));
         errdefer gpa.free(name);
 
-        var pci_device = dir.openDir("device", .{}) catch |err| {
+        var pci_device = dir.openDir(io, "device", .{}) catch |err| {
             log.errAt(@src(), "Expected a 'device' folder in the sysfs of {s}: {t}", .{ name, err });
             return err;
         };
-        defer pci_device.close();
+        defer pci_device.close(io);
         if (comptime std.log.logEnabled(.debug, .timecard)) {
-            var buffer: [std.fs.max_path_bytes]u8 = undefined;
-            log.debug("Card {s} is part of the PCI device {s}", .{ name, try pci_device.realpath(".", &buffer) });
+            var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
+            log.debug("Card {s} is part of the PCI device {s}", .{ name, buffer[0..try pci_device.realPath(io, &buffer)] });
         }
 
-        var pci_info: PciInfo = try .fromDir(gpa, pci_device);
+        var pci_info: PciInfo = try .fromDir(gpa, io, pci_device);
         errdefer pci_info.deinit(gpa);
         log.info("Card {s} detected as {s} {s} rev. {}, PCI x{}", .{
             name,
@@ -136,41 +137,42 @@ pub const Timecard = struct {
             pci_info.max_width,
         });
 
-        var ptp_info: PtpInfo = try .init(gpa, dir);
-        errdefer ptp_info.deinit(gpa);
+        var ptp_info: PtpInfo = try .init(gpa, io, dir);
+        errdefer ptp_info.deinit(gpa, io);
         log.info("Card {s} exposes PTP clock {s}", .{ name, ptp_info.name });
 
         var buffer: [16]u8 = undefined;
-        const clock_source = dir.readFile("clock_source", &buffer) catch null;
+        const clock_source = dir.readFile(io, "clock_source", &buffer) catch null;
 
-        const pci_delay: i64 = try readIntegerFromFile("timecard's sysfs", i64, dir, "ts_window_adjust");
+        const pci_delay: i64 = try readIntegerFromFile("timecard's sysfs", i64, io, dir, "ts_window_adjust");
         if (pci_delay < std.math.minInt(u32) or pci_delay > std.math.maxInt(u32)) {
             log.errAt(@src(), "Timecard {s}'s timestamp window adjustement value {} doesn't fit in an u32. This is a known bug from linux 6.12 to 6.17. To fix: sudo bash -c 'echo 0 > {s}/ts_window_adjust'", .{ name, pci_delay, path });
         }
 
         return .{
             .allocator = gpa,
+            .io = io,
             .name = name,
             .path = try gpa.dupe(u8, path),
-            .serialnumber = readSerialNumber(dir) catch |err| blk: {
+            .serialnumber = readSerialNumber(io, dir) catch |err| blk: {
                 log.errAt(@src(), "Unable to read serial number of {s}: {t}", .{ name, err });
                 break :blk null;
             },
-            .serial_ports_name = try getSerialPortsName(gpa, dir),
+            .serial_ports_name = try getSerialPortsName(gpa, io, dir),
             .pci_info = pci_info,
             .ptp_info = ptp_info,
-            .ios = try findConnectors(gpa, dir),
+            .ios = try findConnectors(gpa, io, dir),
             .clock_source = if (clock_source) |src| try gpa.dupe(u8, std.mem.trim(u8, src, "\n")) else null,
-            .available_clock_sources = readListFromFile(gpa, dir, "available_clock_sources", .{ .location = "timecard's sysfs", .mandatory = false }) catch null,
-            .available_input_formats = try readListFromFile(gpa, dir, "available_sma_inputs", .{ .location = "timecard's sysfs" }),
-            .available_output_formats = try readListFromFile(gpa, dir, "available_sma_outputs", .{ .location = "timecard's sysfs" }),
+            .available_clock_sources = readListFromFile(gpa, io, dir, "available_clock_sources", .{ .location = "timecard's sysfs", .mandatory = false }) catch null,
+            .available_input_formats = try readListFromFile(gpa, io, dir, "available_sma_inputs", .{ .location = "timecard's sysfs" }),
+            .available_output_formats = try readListFromFile(gpa, io, dir, "available_sma_outputs", .{ .location = "timecard's sysfs" }),
             .pci_delay_compensation = @truncate(@as(u64, @bitCast(pci_delay))),
         };
     }
 
     pub fn deinit(self: *Timecard) void {
         self.pci_info.deinit(self.allocator);
-        self.ptp_info.deinit(self.allocator);
+        self.ptp_info.deinit(self.allocator, self.io);
         self.allocator.free(self.name);
         self.allocator.free(self.path);
         if (self.clock_source) |source|
@@ -201,118 +203,118 @@ pub const Timecard = struct {
     }
 
     pub fn to_json(self: Timecard, arena: Allocator) !std.json.Value {
-        var top: std.json.ObjectMap = .init(arena);
-        try top.ensureTotalCapacity(8);
+        var top: std.json.ObjectMap = .empty;
+        try top.ensureTotalCapacity(arena, 8);
         {
-            var card: std.json.ObjectMap = .init(arena);
+            var card: std.json.ObjectMap = .empty;
             if (self.serialnumber) |num| {
-                try card.put("serial_number", .{ .integer = num });
+                try card.put(arena, "serial_number", .{ .integer = num });
             }
-            try card.put("name", .{ .string = self.name });
-            try card.put("path", .{ .string = self.path });
+            try card.put(arena, "name", .{ .string = self.name });
+            try card.put(arena, "path", .{ .string = self.path });
             if (self.clock_source) |source|
-                try card.put("clock_source", .{ .string = source });
-            try card.put("timestamp_window_adjustment", .{ .integer = self.pci_delay_compensation });
+                try card.put(arena, "clock_source", .{ .string = source });
+            try card.put(arena, "timestamp_window_adjustment", .{ .integer = self.pci_delay_compensation });
             {
                 var smas: std.json.Array = .init(arena);
                 for (self.ios) |io| {
-                    var sma: std.json.ObjectMap = .init(arena);
-                    try sma.put("name", .{ .string = io.name });
-                    try sma.put("way", .{ .string = try arena.dupe(u8, @tagName(io.way)) });
-                    try sma.put("format", .{ .string = io.value });
+                    var sma: std.json.ObjectMap = .empty;
+                    try sma.put(arena, "name", .{ .string = io.name });
+                    try sma.put(arena, "way", .{ .string = try arena.dupe(u8, @tagName(io.way)) });
+                    try sma.put(arena, "format", .{ .string = io.value });
                     try smas.append(.{ .object = sma });
                 }
-                try card.put("connectors", .{ .array = smas });
+                try card.put(arena, "connectors", .{ .array = smas });
             }
             {
-                var available: std.json.ObjectMap = .init(arena);
+                var available: std.json.ObjectMap = .empty;
                 if (self.clock_source != null) {
                     var clocksrcs: std.json.Array = .init(arena);
                     if (self.available_clock_sources) |clock_sources| {
                         for (clock_sources) |clcksrc|
                             try clocksrcs.append(.{ .string = clcksrc });
                     }
-                    try available.put("clock_source", .{ .array = clocksrcs });
+                    try available.put(arena, "clock_source", .{ .array = clocksrcs });
                 }
                 {
-                    var formats: std.json.ObjectMap = .init(arena);
+                    var formats: std.json.ObjectMap = .empty;
                     {
                         var input: std.json.Array = .init(arena);
                         for (self.available_input_formats) |fmt|
                             try input.append(.{ .string = fmt });
-                        try formats.put("input", .{ .array = input });
+                        try formats.put(arena, "input", .{ .array = input });
                     }
                     {
                         var output: std.json.Array = .init(arena);
                         for (self.available_output_formats) |fmt|
                             try output.append(.{ .string = fmt });
-                        try formats.put("output", .{ .array = output });
+                        try formats.put(arena, "output", .{ .array = output });
                     }
-                    try available.put("formats", .{ .object = formats });
+                    try available.put(arena, "formats", .{ .object = formats });
                 }
-                try card.put("available", .{ .object = available });
+                try card.put(arena, "available", .{ .object = available });
             }
-            try top.put("card", .{ .object = card });
+            try top.put(arena, "card", .{ .object = card });
         }
         {
-            var ttys: std.json.ObjectMap = .init(arena);
-            try ttys.ensureTotalCapacity(self.serial_ports_name.count());
+            var ttys: std.json.ObjectMap = .empty;
+            try ttys.ensureTotalCapacity(arena, self.serial_ports_name.count());
             var ite = self.serial_ports_name.iterator();
             while (ite.next()) |tty| {
-                try ttys.put(tty.key_ptr.*, .{ .string = tty.value_ptr.* });
+                try ttys.put(arena, tty.key_ptr.*, .{ .string = tty.value_ptr.* });
             }
-            try top.put("serial_ports", .{ .object = ttys });
+            try top.put(arena, "serial_ports", .{ .object = ttys });
         }
         {
-            var ptp: std.json.ObjectMap = .init(arena);
+            var ptp: std.json.ObjectMap = .empty;
 
-            try ptp.put("name", .{ .string = self.ptp_info.name });
+            try ptp.put(arena, "name", .{ .string = self.ptp_info.name });
             {
-                var caps: std.json.ObjectMap = .init(arena);
-                try caps.ensureTotalCapacity(8);
+                var caps: std.json.ObjectMap = .empty;
+                try caps.ensureTotalCapacity(arena, 8);
                 {
-                    var freqadj: std.json.ObjectMap = .init(arena);
-                    try freqadj.put("value", .{ .integer = self.ptp_info.capabilities.max_adj });
-                    try freqadj.put("unit", .{ .string = try arena.dupe(u8, "ppb") });
-                    try caps.put("max_frequency_adjustment", .{ .object = freqadj });
+                    var freqadj: std.json.ObjectMap = .empty;
+                    try freqadj.put(arena, "value", .{ .integer = self.ptp_info.capabilities.max_adj });
+                    try freqadj.put(arena, "unit", .{ .string = try arena.dupe(u8, "ppb") });
+                    try caps.put(arena, "max_frequency_adjustment", .{ .object = freqadj });
                 }
-                try caps.put("programmable_alarms", .{ .integer = self.ptp_info.capabilities.n_alarm });
-                try caps.put("external_timestamp_channels", .{ .integer = self.ptp_info.capabilities.n_ext_ts });
-                try caps.put("periodic_output_signals", .{ .integer = self.ptp_info.capabilities.n_per_out });
-                try caps.put("pps_callback", .{ .bool = (self.ptp_info.capabilities.pps != 0) });
-                try caps.put("cross_timestamping", .{ .bool = (self.ptp_info.capabilities.cross_timestamping != 0) });
-                try caps.put("phase_adjustment", .{ .bool = (self.ptp_info.capabilities.adjust_phase != 0) });
+                try caps.put(arena, "programmable_alarms", .{ .integer = self.ptp_info.capabilities.n_alarm });
+                try caps.put(arena, "external_timestamp_channels", .{ .integer = self.ptp_info.capabilities.n_ext_ts });
+                try caps.put(arena, "periodic_output_signals", .{ .integer = self.ptp_info.capabilities.n_per_out });
+                try caps.put(arena, "pps_callback", .{ .bool = (self.ptp_info.capabilities.pps != 0) });
+                try caps.put(arena, "cross_timestamping", .{ .bool = (self.ptp_info.capabilities.cross_timestamping != 0) });
+                try caps.put(arena, "phase_adjustment", .{ .bool = (self.ptp_info.capabilities.adjust_phase != 0) });
                 {
-                    var phaseadj: std.json.ObjectMap = .init(arena);
-                    try phaseadj.put("value", .{ .integer = self.ptp_info.capabilities.max_phase_adj });
-                    try phaseadj.put("unit", .{ .string = try arena.dupe(u8, "ns") });
-                    try caps.put("max_phase_adjustment", .{ .object = phaseadj });
+                    var phaseadj: std.json.ObjectMap = .empty;
+                    try phaseadj.put(arena, "value", .{ .integer = self.ptp_info.capabilities.max_phase_adj });
+                    try phaseadj.put(arena, "unit", .{ .string = try arena.dupe(u8, "ns") });
+                    try caps.put(arena, "max_phase_adjustment", .{ .object = phaseadj });
                 }
-                try ptp.put("capabilities", .{ .object = caps });
+                try ptp.put(arena, "capabilities", .{ .object = caps });
             }
             {
                 var pins: std.json.Array = .init(arena);
                 try pins.ensureTotalCapacity(@intCast(self.ptp_info.capabilities.n_pins));
                 for (self.ptp_info.pins) |pin| {
                     const name: [*:0]const u8 = pin.name[0..(pin.name.len - 1) :0];
-                    var obj: std.json.ObjectMap = .init(arena);
-                    try obj.put("name", .{ .string = try arena.dupe(u8, std.mem.span(name)) });
-                    try obj.put("function", .{ .string = _ptp.pin_function_string[pin.func] });
-                    try obj.put("channel", .{ .integer = pin.chan });
+                    var obj: std.json.ObjectMap = .empty;
+                    try obj.put(arena, "name", .{ .string = try arena.dupe(u8, std.mem.span(name)) });
+                    try obj.put(arena, "function", .{ .string = _ptp.pin_function_string[pin.func] });
+                    try obj.put(arena, "channel", .{ .integer = pin.chan });
                     try pins.append(.{ .object = obj });
                 }
-                try ptp.put("pins", .{ .array = pins });
+                try ptp.put(arena, "pins", .{ .array = pins });
             }
-            try top.put("ptp", .{ .object = ptp });
+            try top.put(arena, "ptp", .{ .object = ptp });
         }
         {
-            var pci: std.json.ObjectMap = .init(arena);
-            try pci.put("vendor", if (self.pci_info.vendor) |vendor| .{ .string = try arena.dupe(u8, @tagName(vendor)) } else .null);
-            try pci.put("device", if (self.pci_info.device) |device| .{ .string = try arena.dupe(u8, @tagName(device)) } else .null);
-            try pci.put("revision", .{ .integer = self.pci_info.revision });
-            try pci.put("max_speed", .{ .string = self.pci_info.max_speed });
-            try pci.put("max_width", .{ .integer = self.pci_info.max_width });
-            try top.put("pci", .{ .object = pci });
+            var pci: std.json.ObjectMap = .empty;
+            try pci.put(arena, "vendor", if (self.pci_info.vendor) |vendor| .{ .string = try arena.dupe(u8, @tagName(vendor)) } else .null);
+            try pci.put(arena, "device", if (self.pci_info.device) |device| .{ .string = try arena.dupe(u8, @tagName(device)) } else .null);
+            try pci.put(arena, "revision", .{ .integer = self.pci_info.revision });
+            try pci.put(arena, "max_speed", .{ .string = self.pci_info.max_speed });
+            try pci.put(arena, "max_width", .{ .integer = self.pci_info.max_width });
+            try top.put(arena, "pci", .{ .object = pci });
         }
         return .{ .object = top };
     }

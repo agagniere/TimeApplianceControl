@@ -42,14 +42,14 @@ pub const PciInfo = struct {
     max_speed: []const u8,
     max_width: u8,
 
-    pub fn fromDir(gpa: std.mem.Allocator, dir: std.fs.Dir) !PciInfo {
+    pub fn fromDir(gpa: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !PciInfo {
         var buffer: [64]u8 = undefined;
-        const content = try dir.readFile("max_link_speed", &buffer);
+        const content = try dir.readFile(io, "max_link_speed", &buffer);
         return .{
-            .vendor = .fromID(try readFileInteger("PCI sysfs", u16, dir, "vendor")),
-            .device = .fromID(try readFileInteger("PCI sysfs", u16, dir, "device")),
-            .revision = try readFileInteger("PCI sysfs", u8, dir, "revision"),
-            .max_width = try readFileInteger("PCI sysfs", u8, dir, "max_link_width"),
+            .vendor = .fromID(try readFileInteger("PCI sysfs", u16, io, dir, "vendor")),
+            .device = .fromID(try readFileInteger("PCI sysfs", u16, io, dir, "device")),
+            .revision = try readFileInteger("PCI sysfs", u8, io, dir, "revision"),
+            .max_width = try readFileInteger("PCI sysfs", u8, io, dir, "max_link_width"),
             .max_speed = try gpa.dupe(u8, std.mem.trim(u8, content, "\n ")),
         };
     }
