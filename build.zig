@@ -68,7 +68,7 @@ pub fn build(b: *std.Build) void {
         const cases = [_]struct { []const u8, E2eCase }{
             .{ "test/fixtures/facebook", .{ .args = &.{ "--ocp-number", "0" } } },
             .{ "test/fixtures/art", .{ .args = &.{ "--ocp-number", "2" } } },
-            .{ "test/failures/pci-delay-estimation", .{ .stderr_match = "value -3 doesn't fit in an u32" } },
+            .{ "test/failures/pci-delay-estimation", .{ .stderr_match = "adjustment is 4294967293ns (displayed by the driver as -3)" } },
             .{ "test/failures/unflashed-eeprom", .{ .stderr_match = "Unable to read serial number of ocp0: InvalidCharacter" } },
             .{ "test/failures/linux-6.8", .{ .exit_code = 1, .stderr_match = "only supports linux 6.9 and newer" } },
         };

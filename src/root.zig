@@ -165,9 +165,11 @@ pub const Timecard = struct {
         var buffer: [max_attribute_size]u8 = undefined;
         const clock_source = readFileFitting(io, dir, "clock_source", &buffer) catch null;
 
-        const pci_delay: i64 = try readIntegerFromFile("timecard's sysfs", i64, io, dir, "ts_window_adjust");
-        if (pci_delay < std.math.minInt(u32) or pci_delay > std.math.maxInt(u32)) {
-            log.errAt(@src(), "Timecard {s}'s timestamp window adjustment value {} doesn't fit in an u32. This is a known bug of linux 6.12 to 7.2, fixed in 7.3 and backported to 6.12.y, 6.18.y and 7.2.y in October 2026. To fix: sudo bash -c 'echo 0 > {s}/ts_window_adjust'", .{ name, pci_delay, path });
+        const printed_pci_delay: i64 = try readIntegerFromFile("timecard's sysfs", i64, io, dir, "ts_window_adjust");
+        // The driver prints its u32 with %d, so large values show up negative
+        const pci_delay: u32 = @truncate(@as(u64, @bitCast(printed_pci_delay)));
+        if (printed_pci_delay < std.math.minInt(u32) or printed_pci_delay > std.math.maxInt(u32)) {
+            log.errAt(@src(), "Timecard {s}'s timestamp window adjustment is {}ns (displayed by the driver as {}), so the system timestamps of PTP readings are off by seconds. This is a known bug of linux 6.12 to 7.2, fixed in 7.3 and backported to 6.12.y, 6.18.y and 7.2.y in October 2026. To fix: sudo bash -c 'echo 0 > {s}/ts_window_adjust'", .{ name, pci_delay, printed_pci_delay, path });
         }
 
         // Allocate everything before copying the arena into the result
@@ -188,7 +190,7 @@ pub const Timecard = struct {
             .available_clock_sources = readListFromFile(arena, io, dir, "available_clock_sources", .{ .location = "timecard's sysfs", .mandatory = false }) catch null,
             .available_input_formats = try readListFromFile(arena, io, dir, "available_sma_inputs", .{ .location = "timecard's sysfs" }),
             .available_output_formats = try readListFromFile(arena, io, dir, "available_sma_outputs", .{ .location = "timecard's sysfs" }),
-            .pci_delay_compensation = @truncate(@as(u64, @bitCast(pci_delay))),
+            .pci_delay_compensation = pci_delay,
         };
         result.arena = arena_state;
         return result;
