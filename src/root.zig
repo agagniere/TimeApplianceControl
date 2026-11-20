@@ -174,7 +174,10 @@ pub const Timecard = struct {
             .name = name,
             .path = try arena.dupe(u8, path),
             .serialnumber = readSerialNumber(io, dir) catch |err| blk: {
-                log.errAt(@src(), "Unable to read serial number of {s}: {t}", .{ name, err });
+                switch (err) {
+                    error.NotFlashed => log.warn("Card {s} has no serial number: its EEPROM was not flashed", .{name}),
+                    else => log.errAt(@src(), "Unable to read serial number of {s}: {t}", .{ name, err }),
+                }
                 break :blk null;
             },
             .serial_ports_name = try getSerialPortsName(arena, io, dir),
