@@ -104,9 +104,9 @@ fn get_timecard_path(gpa: std.mem.Allocator, options: ParsedArgs) ![]const u8 {
         return gpa.dupe(u8, path);
     }
     if (options.options.@"timecard-name") |name| {
-        return std.fmt.allocPrint(gpa, "/sys/class/timecard/{s}", .{name});
+        return gpa.print("/sys/class/timecard/{s}", .{name});
     }
-    return std.fmt.allocPrint(gpa, "/sys/class/timecard/ocp{}", .{options.options.@"ocp-number"});
+    return gpa.print("/sys/class/timecard/ocp{}", .{options.options.@"ocp-number"});
 }
 
 pub fn main(init: std.process.Init) !u8 {
@@ -146,7 +146,7 @@ pub fn main(init: std.process.Init) !u8 {
     const timecard_path = try get_timecard_path(gpa, options);
     defer gpa.free(timecard_path);
     log.info("Starting {s} version {s}, with timecard at {s}", .{ build_info.name, build_info.version, timecard_path });
-    if (!std.fs.path.isAbsolute(timecard_path)) {
+    if (!std.Io.Dir.path.isAbsolute(timecard_path)) {
         log.errAt(@src(), "Timecard's sysfs path required to be absolute. Provided path: '{s}'", .{timecard_path});
         return 1;
     }

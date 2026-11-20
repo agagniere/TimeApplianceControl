@@ -37,7 +37,7 @@ pub fn readListFromFile(
     filename: []const u8,
     comptime log_options: readListFromFileOptions,
 ) ![][]const u8 {
-    var result: std.ArrayListUnmanaged([]const u8) = .empty;
+    var result: std.ArrayList([]const u8) = .empty;
     var buffer: [512]u8 = undefined;
     const content = dir.readFile(io, filename, &buffer) catch |err| {
         if (log_options.mandatory)

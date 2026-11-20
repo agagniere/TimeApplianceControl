@@ -103,7 +103,7 @@ fn addExecutable(
     b: *std.Build,
     exe_name: []const u8,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     tap: *std.Build.Module,
     args: *std.Build.Module,
     build_info: *std.Build.Step.Options,

@@ -36,7 +36,7 @@ pub const PtpInfo = struct {
         };
         defer dir.close(io);
         var buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
-        const name = std.fs.path.basename(buffer[0..try dir.realPath(io, &buffer)]);
+        const name = std.Io.Dir.path.basename(buffer[0..try dir.realPath(io, &buffer)]);
         var dev = try root.openDir(io, "dev", .{});
         defer dev.close(io);
         const ptp_device = dev.openFile(io, name, .{}) catch |err| {
@@ -47,7 +47,7 @@ pub const PtpInfo = struct {
         var caps: linux.struct_ptp_clock_caps = undefined;
         if (ioctl(ptp_device.handle, @bitCast(clock_getcaps), &caps) != 0)
             return error.FailedIoctl;
-        var pin_list: std.ArrayListUnmanaged(linux.struct_ptp_pin_desc) = try .initCapacity(alloc, @intCast(caps.n_pins));
+        var pin_list: std.ArrayList(linux.struct_ptp_pin_desc) = try .initCapacity(alloc, @intCast(caps.n_pins));
         defer pin_list.deinit(alloc);
         for (0..@intCast(caps.n_pins)) |i| {
             const pin: *linux.struct_ptp_pin_desc = pin_list.addOneAssumeCapacity();

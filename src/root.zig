@@ -13,7 +13,7 @@ const readIntegerFromFile = readfile.readIntegerFromFile;
 const log = Log.scoped(.timecard);
 
 const Allocator = std.mem.Allocator;
-const NameMap = std.StringArrayHashMapUnmanaged([]const u8);
+const NameMap = std.array_hash_map.String([]const u8);
 const assert = std.debug.assert;
 
 /// Iterate through the tty folder and read each attribute
@@ -53,7 +53,7 @@ const Connector = struct {
     pub fn fromFile(alloc: Allocator, io: std.Io, parent: std.Io.Dir, filename: []const u8) !Connector {
         var buffer: [32]u8 = undefined;
         const content = try parent.readFile(io, filename, &buffer);
-        const comma = std.mem.indexOfScalar(u8, content, ':');
+        const comma = std.mem.findScalar(u8, content, ':');
         const way: ?Way = blk: {
             if (comma) |c| {
                 if (std.mem.eql(u8, content[0..c], "IN"))
@@ -83,7 +83,7 @@ const Connector = struct {
 };
 
 fn findConnectors(alloc: Allocator, io: std.Io, dir: std.Io.Dir) ![]Connector {
-    var result: std.ArrayListUnmanaged(Connector) = .empty;
+    var result: std.ArrayList(Connector) = .empty;
     var files = dir.iterate();
     while (try files.next(io)) |file| {
         if (std.mem.startsWith(u8, file.name, "sma")) {
@@ -126,7 +126,7 @@ pub const Timecard = struct {
         var dir = try root.openDir(io, relativeToRoot(path), .{ .iterate = true });
         defer dir.close(io);
 
-        const name = try arena.dupe(u8, std.fs.path.basename(path));
+        const name = try arena.dupe(u8, std.Io.Dir.path.basename(path));
 
         var pci_device = dir.openDir(io, "device", .{}) catch |err| {
             log.errAt(@src(), "Expected a 'device' folder in the sysfs of {s}: {t}", .{ name, err });
