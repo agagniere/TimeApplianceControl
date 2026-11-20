@@ -34,8 +34,11 @@ fn getSerialPortsName(alloc: Allocator, io: std.Io, root: std.Io.Dir) !NameMap {
     var buffer: [max_attribute_size]u8 = undefined;
     var ttys = tty_dir.iterate();
     while (try ttys.next(io)) |tty_file| {
-        assert(std.mem.startsWith(u8, tty_file.name, "tty"));
-        assert(tty_file.kind == .file);
+        if (!std.mem.startsWith(u8, tty_file.name, "tty")) {
+            log.warn("Ignoring unexpected attribute '{s}' in the tty folder", .{tty_file.name});
+            continue;
+        }
+        assert(tty_file.kind == .file); // sysfs attributes are files
         try result.put(
             alloc,
             try alloc.dupe(u8, tty_file.name[3..]),
@@ -293,9 +296,9 @@ pub const Timecard = struct {
                 var pins: std.json.Array = .init(arena);
                 try pins.ensureTotalCapacity(@intCast(self.ptp_info.capabilities.n_pins));
                 for (self.ptp_info.pins) |pin| {
-                    const name: [*:0]const u8 = pin.name[0..(pin.name.len - 1) :0];
                     var obj: std.json.ObjectMap = .empty;
-                    try obj.put(arena, "name", .{ .string = try arena.dupe(u8, std.mem.span(name)) });
+                    // The driver is trusted with neither terminating nor zero-padding the name
+                    try obj.put(arena, "name", .{ .string = try arena.dupe(u8, std.mem.sliceTo(&pin.name, 0)) });
                     try obj.put(arena, "function", .{ .string = _ptp.pin_function_string[pin.func] });
                     try obj.put(arena, "channel", .{ .integer = pin.chan });
                     try pins.append(.{ .object = obj });

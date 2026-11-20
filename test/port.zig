@@ -89,7 +89,8 @@ pub fn ioctl(fd: std.c.fd_t, request: c_int, arg: *anyopaque) c_int {
             if (desc.index >= clock.pins.len)
                 return -1;
             const pin = clock.pins[desc.index];
-            if (pin.name.len >= desc.name.len)
+            // A name filling the whole field is left unterminated, as a buggy driver could
+            if (pin.name.len > desc.name.len)
                 return -1;
             desc.name = @splat(0);
             @memcpy(desc.name[0..pin.name.len], pin.name);
