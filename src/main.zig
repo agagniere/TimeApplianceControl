@@ -121,7 +121,7 @@ pub fn main(init: std.process.Init) !u8 {
     defer gpa.free(out_buffer);
     var stdout: std.Io.File.Writer = std.Io.File.stdout().writer(io, out_buffer);
     var output: *std.Io.Writer = &stdout.interface;
-    defer output.flush() catch unreachable;
+    defer output.flush() catch {};
 
     // CLI arguments
     const options: ParsedArgs = argsParser.parseWithVerbForCurrentProcess(CommonOptions, Verbs, init, .{ .forward = log_error }) catch return 1;
