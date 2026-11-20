@@ -6,7 +6,10 @@ const log = @import("log.zig").config.scoped(.timecard);
 const linux = @import("ptp_clock");
 
 /// Hmmmmmmmmmmm
-/// https://elixir.bootlin.com/linux/v6.14.11/source/tools/testing/selftests/ptp/testptp.c#L89
+/// A PTP device is a dynamic POSIX clock, usable with clock_gettime through a clockid built from its fd:
+/// the inverted fd makes the id negative, unlike static clocks such as CLOCK_REALTIME,
+/// and the low 3 bits set to 3 (CLOCKFD) tell it apart from the negative ids of CPU-time clocks.
+/// This is FD_TO_CLOCKID in https://elixir.bootlin.com/linux/v6.14.11/source/tools/testing/selftests/ptp/testptp.c#L89
 fn getClockID(fd: std.posix.fd_t) std.posix.clockid_t {
     const hmm: u32 = @intCast(fd);
     return @fromBackingInt(@intCast((~hmm << 3) | 3));
@@ -66,7 +69,7 @@ pub const PtpInfo = struct {
         };
     }
 
-    /// Returns the difference in nanosecond
+    /// Returns the difference in nanoseconds
     fn diff(a: linux.struct_ptp_clock_time, b: linux.struct_ptp_clock_time) i64 {
         const a_ns: i64 = a.nsec;
         const b_ns: i64 = b.nsec;
@@ -79,7 +82,7 @@ pub const PtpInfo = struct {
     /// positive if the clock is early
     pub fn readOffset(
         self: PtpInfo,
-        /// Wether to take UTC TAI offset into account
+        /// Whether to take the TAI-UTC offset into account
         tai: bool,
     ) !i64 {
         var readings: linux.struct_ptp_sys_offset_extended = .{ .n_samples = 1 };

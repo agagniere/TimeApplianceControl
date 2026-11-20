@@ -45,7 +45,7 @@ const CommonOptions = struct {
             .@"timecard-path" = "Specify the absolute path of the appliance's sysfs. Overrides --timecard-name and --ocp-number",
             .root = "Resolve all absolute paths (sysfs and /dev) relative to this directory, like chroot. Defaults to /",
             .help = "Display this usage message on standard output and exit successfully",
-            .version = "Show version information of the standard output and exit successfully",
+            .version = "Show version information on standard output and exit successfully",
         },
     };
 };
@@ -198,7 +198,7 @@ fn start_monitoring(
             };
             defer statsd.close(io);
             var statsd_writer = statsd.writer(io, &buffer);
-            log.info("Will send statds metrics to {f}", .{address});
+            log.info("Will send statsd metrics to {f}", .{address});
             return monitor(io, timecard, &statsd_writer.interface);
         },
     } else |err| switch (err) {
@@ -206,7 +206,7 @@ fn start_monitoring(
         error.Closed => {},
     }
     log.errAt(@src(), "Failed to connect to {s}:{}", .{ options.@"statsd-address", options.@"statsd-port" });
-    return error.ConnexionFailed;
+    return error.ConnectionFailed;
 }
 
 fn monitor(

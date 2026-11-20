@@ -24,7 +24,7 @@ fn getSerialPortsName(alloc: Allocator, io: std.Io, root: std.Io.Dir) !NameMap {
     var tty_dir = root.openDir(io, "tty", .{ .iterate = true }) catch |err| {
         switch (err) {
             error.FileNotFound => {
-                log.errAt(@src(), "This program only supports linux 6.9 and newer, where the driver groups the ttys read-only attributes in a folder", .{});
+                log.errAt(@src(), "This program only supports linux 6.9 and newer, where the driver groups the ttys' read-only attributes in a folder", .{});
             },
             else => {},
         }
