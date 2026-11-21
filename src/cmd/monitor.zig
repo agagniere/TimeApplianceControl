@@ -247,7 +247,29 @@ pub fn main(init: std.process.Init) !u8 {
     };
     defer timecard.deinit();
 
-    // Stopped before the timecard is freed, since its last export reads the timecard
+    // The names of the card and of its clock follow the probe order, so they can change when cards are added or moved
+    var attributes: std.ArrayList(otel.Attribute) = .empty;
+    defer attributes.deinit(gpa); // After the reader's last export
+    try attributes.appendSlice(gpa, &otel.attributes.fromPairs(.{
+        .{ attribute.timecard_name, timecard.name },
+        .{ attribute.timecard_path, timecard.path },
+    }));
+    // The logs get only what was discovered, since their resource has the attributes above
+    const discovered = attributes.items.len;
+    try attributes.appendSlice(gpa, &otel.attributes.fromPairs(.{.{ attribute.ptp_clock_name, timecard.ptp_info.name }}));
+    // Left out when unknown
+    var serial_number_buffer: [std.fmt.count("{}", .{std.math.maxInt(u32)})]u8 = undefined;
+    if (timecard.serialnumber) |serial_number|
+        try attributes.appendSlice(gpa, &otel.attributes.fromPairs(.{.{ attribute.hw_serial_number, std.fmt.bufPrint(&serial_number_buffer, "{}", .{serial_number}) catch unreachable }}));
+    if (timecard.pci_info.vendor) |vendor|
+        try attributes.appendSlice(gpa, &otel.attributes.fromPairs(.{.{ attribute.hw_vendor, @tagName(vendor) }}));
+    if (timecard.pci_info.device) |device|
+        try attributes.appendSlice(gpa, &otel.attributes.fromPairs(.{.{ attribute.hw_model, @tagName(device) }}));
+
+    // Taken once the list stops growing
+    log.attributes = attributes.items[discovered..];
+
+    // Stopped before the timecard and the attributes are freed, since its last export reads them
     const metric_reader = try otel.metrics.PeriodicExportingReader.init(
         gpa,
         io,
@@ -258,27 +280,6 @@ pub fn main(init: std.process.Init) !u8 {
     );
     unread_exporter = null;
     defer metric_reader.shutdown() catch {};
-
-    // The names of the card and of its clock follow the probe order, so they can change when cards are added or moved
-    var attributes_buffer: [6]otel.Attribute = undefined;
-    var attributes: std.ArrayList(otel.Attribute) = .initBuffer(&attributes_buffer);
-    attributes.appendSliceAssumeCapacity(&otel.attributes.fromPairs(.{
-        .{ attribute.timecard_name, timecard.name },
-        .{ attribute.timecard_path, timecard.path },
-    }));
-    // The logs get only what was discovered, since their resource has the attributes above
-    const discovered = attributes.items.len;
-    attributes.appendSliceAssumeCapacity(&otel.attributes.fromPairs(.{.{ attribute.ptp_clock_name, timecard.ptp_info.name }}));
-    // Left out when unknown
-    var serial_number_buffer: [std.fmt.count("{}", .{std.math.maxInt(u32)})]u8 = undefined;
-    if (timecard.serialnumber) |serial_number|
-        attributes.appendSliceAssumeCapacity(&otel.attributes.fromPairs(.{.{ attribute.hw_serial_number, std.fmt.bufPrint(&serial_number_buffer, "{}", .{serial_number}) catch unreachable }}));
-    if (timecard.pci_info.vendor) |vendor|
-        attributes.appendSliceAssumeCapacity(&otel.attributes.fromPairs(.{.{ attribute.hw_vendor, @tagName(vendor) }}));
-    if (timecard.pci_info.device) |device|
-        attributes.appendSliceAssumeCapacity(&otel.attributes.fromPairs(.{.{ attribute.hw_model, @tagName(device) }}));
-
-    log.attributes = attributes.items[discovered..];
 
     var observed: Observed = .{ .io = io, .log = log, .timecard = &timecard, .attributes = attributes.items };
     var offset_callbacks = [_]ObserveMeasures{observeOffset};
