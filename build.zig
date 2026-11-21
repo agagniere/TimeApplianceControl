@@ -48,6 +48,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "args", .module = argsParser.module("args") },
             .{ .name = "opentelemetry", .module = opentelemetry.module("sdk") },
+            .{ .name = "semconv", .module = opentelemetry.module("opentelemetry-semconv") },
         },
     };
     const exe = addExecutable(b, tapctl.name, tapctl, target, optimize, mod);

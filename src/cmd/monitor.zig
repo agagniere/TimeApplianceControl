@@ -4,6 +4,7 @@
 const std = @import("std");
 const argsParser = @import("args");
 const otel = @import("opentelemetry");
+const semconv = @import("semconv");
 const tap = @import("tap");
 const cli = @import("cli.zig");
 
@@ -40,6 +41,16 @@ const ObserveMeasures = @typeInfo(@typeInfo(create_observable_gauge.param_types[
 const ObserveResult = @typeInfo(@typeInfo(ObserveMeasures).pointer.child).@"fn".return_type.?;
 const MeasurementsData = @typeInfo(ObserveResult).error_union.payload;
 const DataPoint = @typeInfo(@FieldType(MeasurementsData, "int")).pointer.child;
+
+/// The attributes of tap-monitor, as semantic convention definitions so that `fromPairs` checks their values
+const attribute = struct {
+    const timecard_name: semconv.types.StringAttribute = .init("timecard.name", "The name of the timecard in its sysfs class, following the probe order", .development, .required);
+    const ptp_clock_name: semconv.types.StringAttribute = .init("ptp.clock.name", "The name of the timecard's PTP clock in /dev, following the probe order", .development, .required);
+    // Defined by versions of the semantic conventions newer than the SDK's
+    const hw_serial_number: semconv.types.StringAttribute = .init("hw.serial_number", "Serial number of the hardware component", .development, .recommended);
+    const hw_vendor: semconv.types.StringAttribute = .init("hw.vendor", "Vendor name of the hardware component", .development, .recommended);
+    const hw_model: semconv.types.StringAttribute = .init("hw.model", "Descriptive model name of the hardware component", .development, .recommended);
+};
 
 /// The logs of tap-monitor itself, which unlike std.log's give their source location.
 /// Like the bridge's, they are written to stderr too
@@ -178,7 +189,7 @@ pub fn main(init: std.process.Init) !u8 {
     const log_processor = try otel.logs.BatchingLogRecordProcessor.init(gpa, io, log_exporter.asLogRecordExporter(), .{});
     defer log_processor.deinit();
     // Each instance monitors one card: its name, known from the options, also identifies the logs of the library
-    const resource = [_]otel.Attribute{.{ .key = "timecard.name", .value = .{ .string = std.Io.Dir.path.basename(timecard_path) } }};
+    const resource = otel.attributes.fromPairs(.{.{ attribute.timecard_name, std.Io.Dir.path.basename(timecard_path) }});
     const logger_provider = try otel.logs.LoggerProvider.init(gpa, io, &resource);
     defer logger_provider.deinit();
     try logger_provider.addLogRecordProcessor(log_processor.asLogRecordProcessor());
@@ -221,15 +232,18 @@ pub fn main(init: std.process.Init) !u8 {
     // The names of the card and of its clock follow the probe order, so they can change when cards are added or moved
     var attributes_buffer: [5]otel.Attribute = undefined;
     var attributes: std.ArrayList(otel.Attribute) = .initBuffer(&attributes_buffer);
-    attributes.appendAssumeCapacity(.{ .key = "timecard.name", .value = .{ .string = timecard.name } });
-    attributes.appendAssumeCapacity(.{ .key = "ptp.clock.name", .value = .{ .string = timecard.ptp_info.name } });
+    attributes.appendSliceAssumeCapacity(&otel.attributes.fromPairs(.{
+        .{ attribute.timecard_name, timecard.name },
+        .{ attribute.ptp_clock_name, timecard.ptp_info.name },
+    }));
+    // Left out when unknown
     var serial_number_buffer: [std.fmt.count("{}", .{std.math.maxInt(u32)})]u8 = undefined;
     if (timecard.serialnumber) |serial_number|
-        attributes.appendAssumeCapacity(.{ .key = "hw.serial_number", .value = .{ .string = std.fmt.bufPrint(&serial_number_buffer, "{}", .{serial_number}) catch unreachable } });
+        attributes.appendSliceAssumeCapacity(&otel.attributes.fromPairs(.{.{ attribute.hw_serial_number, std.fmt.bufPrint(&serial_number_buffer, "{}", .{serial_number}) catch unreachable }}));
     if (timecard.pci_info.vendor) |vendor|
-        attributes.appendAssumeCapacity(.{ .key = "hw.vendor", .value = .{ .string = @tagName(vendor) } });
+        attributes.appendSliceAssumeCapacity(&otel.attributes.fromPairs(.{.{ attribute.hw_vendor, @tagName(vendor) }}));
     if (timecard.pci_info.device) |device|
-        attributes.appendAssumeCapacity(.{ .key = "hw.model", .value = .{ .string = @tagName(device) } });
+        attributes.appendSliceAssumeCapacity(&otel.attributes.fromPairs(.{.{ attribute.hw_model, @tagName(device) }}));
 
     var observed: Observed = .{ .io = io, .log = log, .timecard = &timecard, .attributes = attributes.items };
     var callbacks = [_]ObserveMeasures{observeOffset};
