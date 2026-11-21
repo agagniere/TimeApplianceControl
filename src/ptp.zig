@@ -44,7 +44,7 @@ pub const PtpInfo = struct {
         defer dev.close(io);
         const ptp_device = dev.openFile(io, name, .{}) catch |err| {
             switch (err) {
-                error.AccessDenied, error.PermissionDenied => log.err("Not allowed to open /dev/{s}: {t}. Reading the PTP clock requires root access, run tapctl with sudo", .{ name, err }),
+                error.AccessDenied, error.PermissionDenied => log.err("Not allowed to open /dev/{s}: {t}. Reading the PTP clock requires root access, for example with sudo", .{ name, err }),
                 else => log.err("Error opening /dev/{s}: {t}", .{ name, err }),
             }
             return err;

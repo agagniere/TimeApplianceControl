@@ -85,7 +85,7 @@ pub fn build(b: *std.Build) void {
             no_sudo.addDirectoryArg(b.path("test/fixtures/facebook"));
             no_sudo.addArg("ptp1");
             const root = no_sudo.addOutputDirectoryArg("no-sudo");
-            addE2eRun(b, e2e_step, e2e_exe, "no-sudo", root, .{ .exit_code = 1, .stderr_match = "Reading the PTP clock requires root access, run tapctl with sudo" });
+            addE2eRun(b, e2e_step, e2e_exe, "no-sudo", root, .{ .exit_code = 1, .stderr_match = "Reading the PTP clock requires root access, for example with sudo" });
         }
         test_step.dependOn(e2e_step);
     }
