@@ -49,9 +49,9 @@ Options:
 
 ```console
 $ zig build run-monitor -- --help
-Usage: tap-monitor [-N NUMBER | -n NAME | -P PATH] [-r ROOT] [-h] [-v]
+Usage: tap-monitor [-N NUMBER | -n NAME | -P PATH] [-r ROOT] [-i MILLISECONDS] [-h] [-v]
 
-Report the offset between the PTP clock of a time card and the system clock with OpenTelemetry, read as often as the metrics are exported.
+Report the offset between the PTP clock of a time card and the system clock with OpenTelemetry, as histograms of the readings made between two exports of the metrics.
 Configure the export with the standard environment variables, such as OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME (tap-monitor by default), and OTEL_METRIC_EXPORT_INTERVAL (10000 ms by default)
 
 Options:
@@ -65,6 +65,8 @@ Options:
                         Overrides --timecard-name and --ocp-number
   -r, --root            Resolve all absolute paths (sysfs and /dev) relative
                         to this directory, like chroot. Defaults to /
+  -i, --interval        Specify how often to read the offset, in milliseconds.
+                        Defaults to 2000
   -h, --help            Display this usage message on standard output and
                         exit successfully
   -v, --version         Show version information on standard output and
@@ -77,8 +79,8 @@ Note: Super user privilege is required to access `/dev/ptp<N>`
 
 ### Monitor clock offset
 
-The offset is read as often as the metrics are exported, every 10 seconds unless `OTEL_METRIC_EXPORT_INTERVAL` says otherwise, and reported as the gauge `timecard.ptp.offset`, in nanoseconds, with the attributes `timecard.name`, `timecard.path` and `ptp.clock.name`, and when known `hw.serial_number`, `hw.vendor` and `hw.model` from OpenTelemetry's hardware conventions. Prefer the serial number to identify a card: the names follow the order in which cards are probed.
-The gauge `timecard.ptp.offset.window`, from the same reading and with the same attributes, is the system time elapsed while the PTP clock was read: the offset is known to within half of it.
+The offset is read every 2 seconds unless `--interval` says otherwise. At each export of the metrics, every 10 seconds unless `OTEL_METRIC_EXPORT_INTERVAL` says otherwise, the readings made since the previous one are summarized by the exponential histogram `timecard.ptp.offset` (delta temporality, with min and max), in nanoseconds, with the attributes `timecard.name`, `timecard.path` and `ptp.clock.name`, and when known `hw.serial_number`, `hw.vendor` and `hw.model` from OpenTelemetry's hardware conventions. Prefer the serial number to identify a card: the names follow the order in which cards are probed.
+The histogram `timecard.ptp.offset.window`, of the same readings and with the same attributes, is the system time elapsed while the PTP clock was read: each offset is known to within half of its window.
 Logs are exported too, with the attributes `timecard.name` and `timecard.path`, and also written to stderr for journald.
 The service is named `tap-monitor` unless `OTEL_SERVICE_NAME` or `service.name` in `OTEL_RESOURCE_ATTRIBUTES` says otherwise.
 OpenTelemetry is set up before looking for the timecard, so that the collector also receives startup errors.

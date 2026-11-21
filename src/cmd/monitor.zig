@@ -33,6 +33,15 @@ fn isServiceNamed(environ_map: *const std.process.Environ.Map) bool {
     return false;
 }
 
+/// Exponential histograms adapt their buckets to the values, which range from nanoseconds to seconds, of either sign
+fn aggregation(kind: otel.metrics.Kind) otel.metrics.View.Aggregation {
+    const options: otel.metrics.View.ExponentialBucketHistogramConfig.Options = .{};
+    return switch (kind) {
+        .Histogram => .{ .ExponentialBucketHistogram = .{ .max_scale = options.max_scale, .max_size = options.max_size, .record_min_max = options.record_min_max } },
+        else => otel.metrics.View.DefaultAggregation(kind),
+    };
+}
+
 /// The attributes of tap-monitor, as semantic convention definitions so that `fromPairs` checks their values
 const attribute = struct {
     const timecard_name: semconv.types.StringAttribute = .init("timecard.name", "The name of the timecard in its sysfs class, following the probe order", .development, .required);
@@ -87,6 +96,7 @@ const Options = struct {
     @"timecard-name": ?[]const u8 = null,
     @"timecard-path": ?[]const u8 = null,
     root: []const u8 = "/",
+    interval: u32 = 2000,
     help: bool = false,
     version: bool = false,
     pub const wrap_len = 40;
@@ -96,13 +106,14 @@ const Options = struct {
         .n = "timecard-name",
         .P = "timecard-path",
         .r = "root",
+        .i = "interval",
         .h = "help",
         .v = "version",
     };
     pub const meta = .{
-        .usage_summary = "[-N NUMBER | -n NAME | -P PATH] [-r ROOT] [-h] [-v]",
+        .usage_summary = "[-N NUMBER | -n NAME | -P PATH] [-r ROOT] [-i MILLISECONDS] [-h] [-v]",
         .full_text =
-        \\Report the offset between the PTP clock of a time card and the system clock with OpenTelemetry, read as often as the metrics are exported.
+        \\Report the offset between the PTP clock of a time card and the system clock with OpenTelemetry, as histograms of the readings made between two exports of the metrics.
         \\Configure the export with the standard environment variables, such as OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME (tap-monitor by default), and OTEL_METRIC_EXPORT_INTERVAL (10000 ms by default)
         ,
         .option_docs = .{
@@ -110,6 +121,7 @@ const Options = struct {
             .@"timecard-name" = "Specify the name of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/<NAME>. Overrides --ocp-number",
             .@"timecard-path" = "Specify the absolute path of the appliance's sysfs. Overrides --timecard-name and --ocp-number",
             .root = "Resolve all absolute paths (sysfs and /dev) relative to this directory, like chroot. Defaults to /",
+            .interval = "Specify how often to read the offset, in milliseconds. Defaults to 2000",
             .help = "Display this usage message on standard output and exit successfully",
             .version = "Show version information on standard output and exit successfully",
         },
@@ -133,6 +145,10 @@ pub fn main(init: std.process.Init) !u8 {
     if (options.options.help) {
         try argsParser.printHelp(Options, build_info.name, &stdout.interface);
         return 0;
+    }
+    if (options.options.interval == 0) {
+        std.log.scoped(.cli).err("The interval between readings must be at least 1 ms", .{});
+        return 1;
     }
     if (options.options.version) {
         try stdout.interface.writeAll(build_info.name ++ " version " ++ build_info.version ++ "\n");
@@ -176,7 +192,7 @@ pub fn main(init: std.process.Init) !u8 {
 
     const meter_provider = try otel.metrics.MeterProvider.init(gpa, io);
     defer meter_provider.deinit();
-    const metric_exporter = try otel.metrics.MetricExporter.OTLP(gpa, io, null, null, otlp_config);
+    const metric_exporter = try otel.metrics.MetricExporter.OTLP(gpa, io, otel.metrics.View.TemporalityDelta, aggregation, otlp_config);
     defer metric_exporter.otlp.deinit();
     // Until the reader is created, which then shuts the exporter down
     var unread_exporter: ?*otel.metrics.MetricExporter = metric_exporter.exporter;
@@ -224,19 +240,19 @@ pub fn main(init: std.process.Init) !u8 {
     defer metric_reader.shutdown() catch {};
 
     const meter = try meter_provider.getMeter(.{ .name = build_info.name, .version = build_info.version });
-    const offset = try meter.createGauge(i64, .{
+    // Of the readings since the previous export, as the temporality is delta
+    const offset = try meter.createHistogram(i64, .{
         .name = "timecard.ptp.offset",
         .unit = "ns",
         .description = "Time to add to the system clock to get the time of the timecard's PTP clock",
     });
-    const window = try meter.createGauge(i64, .{
+    const window = try meter.createHistogram(i64, .{
         .name = "timecard.ptp.offset.window",
         .unit = "ns",
         .description = "System time elapsed around the reading of the PTP clock: the offset is known to within half of it",
     });
 
-    // At the pace of the exports, since a gauge only exports its last value
-    const interval: std.Io.Duration = .fromMilliseconds(@intCast(config.metrics_config.export_interval_ms));
+    const interval: std.Io.Duration = .fromMilliseconds(options.options.interval);
     while (true) {
         const reading = timecard.ptp_info.readOffset(true) catch |err| {
             log.emit(.err, @src(), "Unable to read the offset of {s}: {t}", .{ timecard.ptp_info.name, err });
