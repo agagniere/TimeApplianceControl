@@ -1,4 +1,5 @@
 .{
+    .offset = 36_999_999_850, // TAI, 150ns behind
     .capabilities = .{
         .max_adj = 100000000,
         .n_ext_ts = 6,
