@@ -5,7 +5,7 @@ A command line interface for timecards of Open Compute's Time Appliance Project
 ## Roadmap of features
 - [x] Dump all user-space info as JSON
 - [x] Monitor the clock offset accross time
-- [ ] Monitor GNSS signal status
+- [x] Monitor GNSS signal status
 - [ ] Monitor oscillator state
 
 ## Requirement
@@ -83,6 +83,9 @@ Note: Super user privilege is required to access `/dev/ptp<N>`
 
 The offset is read every 2 seconds unless `--interval` says otherwise, each reading making 5 samples unless `--samples` says otherwise. At each export of the metrics, every 10 seconds unless `OTEL_METRIC_EXPORT_INTERVAL` says otherwise, the samples read since the previous one are summarized by the exponential histogram `timecard.ptp.offset` (delta temporality, with min and max), in nanoseconds, with the attributes `timecard.name`, `timecard.path` and `ptp.clock.name`, and when known `hw.serial_number`, `hw.vendor` and `hw.model` from OpenTelemetry's hardware conventions. Prefer the serial number to identify a card: the names follow the order in which cards are probed.
 The histogram `timecard.ptp.offset.window`, of the same samples and with the same attributes, is the system time elapsed while the PTP clock was read: each offset is known to within half of its window.
+For the cards that expose them (Facebook, Adva), each reading also records, with the same attributes:
+- the gauge `timecard.gnss.sync`, 1 while the card receives a valid GNSS signal and 0 once it is lost, whose changes are also logged
+- the histograms `timecard.clock_status.offset` and `timecard.clock_status.drift`, the last phase correction (ns) and the frequency correction (about ns/s) that the card's firmware applies to discipline its clock
 Logs are exported too, with the attributes `timecard.name` and `timecard.path`, and also written to stderr for journald.
 The service is named `tap-monitor` unless `OTEL_SERVICE_NAME` or `service.name` in `OTEL_RESOURCE_ATTRIBUTES` says otherwise.
 OpenTelemetry is set up before looking for the timecard, so that the collector also receives startup errors.
