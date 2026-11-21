@@ -97,6 +97,7 @@ const Options = struct {
     @"timecard-path": ?[]const u8 = null,
     root: []const u8 = "/",
     interval: u32 = 2000,
+    samples: u8 = 5,
     help: bool = false,
     version: bool = false,
     pub const wrap_len = 40;
@@ -107,13 +108,14 @@ const Options = struct {
         .P = "timecard-path",
         .r = "root",
         .i = "interval",
+        .s = "samples",
         .h = "help",
         .v = "version",
     };
     pub const meta = .{
-        .usage_summary = "[-N NUMBER | -n NAME | -P PATH] [-r ROOT] [-i MILLISECONDS] [-h] [-v]",
+        .usage_summary = "[-N NUMBER | -n NAME | -P PATH] [-r ROOT] [-i MILLISECONDS] [-s SAMPLES] [-h] [-v]",
         .full_text =
-        \\Report the offset between the PTP clock of a time card and the system clock with OpenTelemetry, as histograms of the readings made between two exports of the metrics.
+        \\Report the offset between the PTP clock of a time card and the system clock with OpenTelemetry, as histograms of the samples read between two exports of the metrics.
         \\Configure the export with the standard environment variables, such as OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME (tap-monitor by default), and OTEL_METRIC_EXPORT_INTERVAL (10000 ms by default)
         ,
         .option_docs = .{
@@ -122,6 +124,7 @@ const Options = struct {
             .@"timecard-path" = "Specify the absolute path of the appliance's sysfs. Overrides --timecard-name and --ocp-number",
             .root = "Resolve all absolute paths (sysfs and /dev) relative to this directory, like chroot. Defaults to /",
             .interval = "Specify how often to read the offset, in milliseconds. Defaults to 2000",
+            .samples = std.fmt.comptimePrint("Specify how many samples each reading makes, from 1 to {}. Defaults to 5", .{tap.PtpInfo.max_samples}),
             .help = "Display this usage message on standard output and exit successfully",
             .version = "Show version information on standard output and exit successfully",
         },
@@ -148,6 +151,10 @@ pub fn main(init: std.process.Init) !u8 {
     }
     if (options.options.interval == 0) {
         std.log.scoped(.cli).err("The interval between readings must be at least 1 ms", .{});
+        return 1;
+    }
+    if (options.options.samples < 1 or options.options.samples > tap.PtpInfo.max_samples) {
+        std.log.scoped(.cli).err("The number of samples per reading must be from 1 to {}, not {}", .{ tap.PtpInfo.max_samples, options.options.samples });
         return 1;
     }
     if (options.options.version) {
@@ -254,13 +261,17 @@ pub fn main(init: std.process.Init) !u8 {
     });
 
     const interval: std.Io.Duration = .fromMilliseconds(options.options.interval);
+    var samples_buffer: [tap.PtpInfo.max_samples]tap.Offset = undefined;
+    const samples = samples_buffer[0..options.options.samples];
     while (true) {
-        const reading = timecard.ptp_info.readOffset(true) catch |err| {
+        timecard.ptp_info.readOffsets(true, samples) catch |err| {
             log.emit(.err, @src(), "Unable to read the offset of {s}: {t}", .{ timecard.ptp_info.name, err });
             return error.ReadingFailed;
         };
-        try offset.recordWithSlice(reading.value, attributes.items);
-        try window.recordWithSlice(reading.window, attributes.items);
+        for (samples) |sample| {
+            try offset.recordWithSlice(sample.value, attributes.items);
+            try window.recordWithSlice(sample.window, attributes.items);
+        }
         try io.sleep(interval, .awake);
     }
 }

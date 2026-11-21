@@ -85,27 +85,34 @@ pub const PtpInfo = struct {
         return a_ns - b_ns + std.time.ns_per_s * sec_diff;
     }
 
-    /// Returns how many nanoseconds to add to system clock to find the card's time
-    /// So the value is negative if the card is late,
-    /// positive if the clock is early
-    pub fn readOffset(
+    /// The most samples a single reading can make
+    pub const max_samples: usize = linux.PTP_MAX_SAMPLES;
+
+    /// Reads the PTP clock against the system clock once per element of `samples`, from 1 to `max_samples`, in a single request.
+    /// Their values are how many nanoseconds to add to system clock to find the card's time,
+    /// so negative if the card is late, positive if it is early
+    pub fn readOffsets(
         self: PtpInfo,
         /// Whether to take the TAI-UTC offset into account
         tai: bool,
-    ) !Offset {
-        var readings: linux.struct_ptp_sys_offset_extended = .{ .n_samples = 1 };
+        samples: []Offset,
+    ) !void {
+        std.debug.assert(samples.len >= 1 and samples.len <= max_samples);
+        var readings: linux.struct_ptp_sys_offset_extended = .{ .n_samples = @intCast(samples.len) };
         if (ioctl(self.device.handle, @bitCast(sys_offset_extended), &readings) != 0)
             return error.FailedIoctl;
-        const sys_window = diff(readings.ts[0][2], readings.ts[0][0]);
-        if (sys_window < 0) {
-            log.err("Non monotonic system clock, unable to make a reading. This might be due to an invalid ts_window_adjust value, consider setting it to 0", .{});
-            return error.NonMonotonicSystemClock;
-        }
         const offset: i64 = if (tai) (-37 * std.time.ns_per_s) else 0;
-        return .{
-            .value = diff(readings.ts[0][1], readings.ts[0][0]) - @divTrunc(sys_window, 2) + offset,
-            .window = sys_window,
-        };
+        for (samples, readings.ts[0..samples.len]) |*sample, ts| {
+            const sys_window = diff(ts[2], ts[0]);
+            if (sys_window < 0) {
+                log.err("Non monotonic system clock, unable to make a reading. This might be due to an invalid ts_window_adjust value, consider setting it to 0", .{});
+                return error.NonMonotonicSystemClock;
+            }
+            sample.* = .{
+                .value = diff(ts[1], ts[0]) - @divTrunc(sys_window, 2) + offset,
+                .window = sys_window,
+            };
+        }
     }
 
     pub fn deinit(self: *PtpInfo, gpa: Allocator, io: std.Io) void {
