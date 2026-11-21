@@ -212,7 +212,8 @@ pub fn main(init: std.process.Init) !u8 {
         .{ attribute.timecard_name, timecard.name },
         .{ attribute.timecard_path, timecard.path },
     }));
-    // The logs get only what was discovered, since their resource has the attributes above
+    // The logs get only what was discovered, since their resource has the attributes above.
+    // The metrics can't have a resource from the application: https://github.com/open-telemetry/opentelemetry-zig/issues/195
     const first_discovered = attributes.items.len;
     try attributes.appendSlice(gpa, &otel.attributes.fromPairs(.{.{ attribute.ptp_clock_name, timecard.ptp_info.name }}));
     // Left out when unknown
