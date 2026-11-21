@@ -59,6 +59,14 @@ const FakeClock = struct {
     } = &.{},
 };
 
+/// For the duration of the fake readings of the PTP clock, seeded for reproducible runs
+var prng: std.Random.DefaultPrng = .init(0);
+
+/// In nanoseconds, a normal distribution of 100ns, with a standard deviation of 15ns
+fn readingWindow() i64 {
+    return @max(0, @as(i64, @intFromFloat(@round(100 + 15 * prng.random().floatNorm(f64)))));
+}
+
 /// Answer the ioctls from the ZON description of the clock.
 /// The time of the PTP clock is the system's, shifted by the offset of the description
 pub fn ioctl(fd: std.c.fd_t, request: c_int, arg: *anyopaque) c_int {
@@ -106,10 +114,11 @@ pub fn ioctl(fd: std.c.fd_t, request: c_int, arg: *anyopaque) c_int {
                 return -1;
             for (readings.ts[0..readings.n_samples]) |*sample| {
                 // The system time before, the PTP clock's time, the system time after.
-                // The PTP clock is read in the middle, so that the reading is the offset whatever the resolution of the system clock
+                // The PTP clock is read in the middle of a random window, so that the reading is the offset whatever the resolution of the system clock
+                const window = readingWindow();
                 sample[0] = systemTime() orelse return -1;
-                sample[2] = systemTime() orelse return -1;
-                sample[1] = shift(sample[0], @divFloor(diff(sample[2], sample[0]), 2) + clock.offset);
+                sample[2] = shift(sample[0], window);
+                sample[1] = shift(sample[0], @divFloor(window, 2) + clock.offset);
             }
         },
         else => return -1,
@@ -122,11 +131,6 @@ fn systemTime() ?struct_ptp_clock_time {
     if (std.c.clock_gettime(.REALTIME, &now) != 0)
         return null;
     return .{ .sec = now.sec, .nsec = @intCast(now.nsec) };
-}
-
-/// In nanoseconds
-fn diff(a: struct_ptp_clock_time, b: struct_ptp_clock_time) i64 {
-    return (a.sec - b.sec) * std.time.ns_per_s + @as(i64, a.nsec) - b.nsec;
 }
 
 fn shift(time: struct_ptp_clock_time, offset: i64) struct_ptp_clock_time {
