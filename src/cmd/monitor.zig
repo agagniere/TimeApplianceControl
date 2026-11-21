@@ -45,6 +45,7 @@ const DataPoint = @typeInfo(@FieldType(MeasurementsData, "int")).pointer.child;
 /// The attributes of tap-monitor, as semantic convention definitions so that `fromPairs` checks their values
 const attribute = struct {
     const timecard_name: semconv.types.StringAttribute = .init("timecard.name", "The name of the timecard in its sysfs class, following the probe order", .development, .required);
+    const timecard_path: semconv.types.StringAttribute = .init("timecard.path", "The path of the timecard's sysfs, as given in the options", .development, .recommended);
     const ptp_clock_name: semconv.types.StringAttribute = .init("ptp.clock.name", "The name of the timecard's PTP clock in /dev, following the probe order", .development, .required);
     // Defined by versions of the semantic conventions newer than the SDK's
     const hw_serial_number: semconv.types.StringAttribute = .init("hw.serial_number", "Serial number of the hardware component", .development, .recommended);
@@ -188,8 +189,11 @@ pub fn main(init: std.process.Init) !u8 {
     defer log_exporter.deinit();
     const log_processor = try otel.logs.BatchingLogRecordProcessor.init(gpa, io, log_exporter.asLogRecordExporter(), .{});
     defer log_processor.deinit();
-    // Each instance monitors one card: its name, known from the options, also identifies the logs of the library
-    const resource = otel.attributes.fromPairs(.{.{ attribute.timecard_name, std.Io.Dir.path.basename(timecard_path) }});
+    // Each instance monitors one card: its name and path, known from the options, also identify the logs of the library
+    const resource = otel.attributes.fromPairs(.{
+        .{ attribute.timecard_name, std.Io.Dir.path.basename(timecard_path) },
+        .{ attribute.timecard_path, timecard_path },
+    });
     const logger_provider = try otel.logs.LoggerProvider.init(gpa, io, &resource);
     defer logger_provider.deinit();
     try logger_provider.addLogRecordProcessor(log_processor.asLogRecordProcessor());
@@ -230,10 +234,11 @@ pub fn main(init: std.process.Init) !u8 {
     defer metric_reader.shutdown() catch {};
 
     // The names of the card and of its clock follow the probe order, so they can change when cards are added or moved
-    var attributes_buffer: [5]otel.Attribute = undefined;
+    var attributes_buffer: [6]otel.Attribute = undefined;
     var attributes: std.ArrayList(otel.Attribute) = .initBuffer(&attributes_buffer);
     attributes.appendSliceAssumeCapacity(&otel.attributes.fromPairs(.{
         .{ attribute.timecard_name, timecard.name },
+        .{ attribute.timecard_path, timecard.path },
         .{ attribute.ptp_clock_name, timecard.ptp_info.name },
     }));
     // Left out when unknown
