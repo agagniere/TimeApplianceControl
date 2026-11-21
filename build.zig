@@ -89,6 +89,8 @@ pub fn build(b: *std.Build) void {
         };
         for (cases) |case|
             addE2eRun(b, e2e_step, e2e_exe, std.fs.path.basename(case[0]), b.path(case[0]), case[1]);
+        // Its timecard is ocp2, not the default ocp0
+        addE2eRun(b, e2e_step, e2e_exe, "wrong-number", b.path("test/fixtures/art"), .{ .exit_code = 1, .stderr_match = "No timecard at /sys/class/timecard/ocp0" });
 
         // Git doesn't store file permissions, so this root is generated. Root can open the device anyway
         if (!isRoot()) {

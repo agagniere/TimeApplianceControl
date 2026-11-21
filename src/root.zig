@@ -133,7 +133,13 @@ pub const Timecard = struct {
         errdefer arena_state.deinit();
         const arena = arena_state.allocator();
 
-        var dir = try root.openDir(io, relativeToRoot(path), .{ .iterate = true });
+        var dir = root.openDir(io, relativeToRoot(path), .{ .iterate = true }) catch |err| {
+            switch (err) {
+                error.FileNotFound => log.err("No timecard at {s}", .{path}),
+                else => log.err("Unable to open the sysfs of the timecard at {s}: {t}", .{ path, err }),
+            }
+            return err;
+        };
         defer dir.close(io);
 
         const name = try arena.dupe(u8, std.Io.Dir.path.basename(path));
