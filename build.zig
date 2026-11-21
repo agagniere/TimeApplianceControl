@@ -33,15 +33,23 @@ pub fn build(b: *std.Build) void {
     });
 
     // One-off actions, with readable logs
-    const tapctl: Program = .{ .name = name, .root_source_file = "src/main.zig", .imports = &.{
-        .{ .name = "args", .module = argsParser.module("args") },
-        .{ .name = "axe", .module = axe.module("axe") },
-    } };
+    const tapctl: Program = .{
+        .name = name,
+        .root_source_file = "src/cmd/control.zig",
+        .imports = &.{
+            .{ .name = "args", .module = argsParser.module("args") },
+            .{ .name = "axe", .module = axe.module("axe") },
+        },
+    };
     // Long-running, reporting with OpenTelemetry
-    const monitor: Program = .{ .name = "tap-monitor", .root_source_file = "src/monitor.zig", .imports = &.{
-        .{ .name = "args", .module = argsParser.module("args") },
-        .{ .name = "opentelemetry", .module = opentelemetry.module("sdk") },
-    } };
+    const monitor: Program = .{
+        .name = "tap-monitor",
+        .root_source_file = "src/cmd/monitor.zig",
+        .imports = &.{
+            .{ .name = "args", .module = argsParser.module("args") },
+            .{ .name = "opentelemetry", .module = opentelemetry.module("sdk") },
+        },
+    };
     const exe = addExecutable(b, tapctl.name, tapctl, target, optimize, mod);
     b.installArtifact(exe);
     const monitor_exe = addExecutable(b, monitor.name, monitor, target, optimize, mod);
