@@ -9,8 +9,6 @@ const cli = @import("cli");
 
 const build_info = @import("build_info");
 
-const log = std.log.scoped(.monitor);
-
 pub const std_options: std.Options = .{
     .logFn = logFn,
     .log_level = .info,
@@ -28,9 +26,32 @@ const ObserveResult = @typeInfo(@typeInfo(ObserveMeasures).pointer.child).@"fn".
 const MeasurementsData = @typeInfo(ObserveResult).error_union.payload;
 const DataPoint = @typeInfo(@FieldType(MeasurementsData, "int")).pointer.child;
 
+/// The logs of tap-monitor itself, which unlike std.log's give their source location.
+/// Like the bridge's, they are written to stderr too
+const Log = struct {
+    logger: *otel.logs.Logger,
+
+    fn emit(self: Log, comptime level: std.log.Level, location: std.builtin.SourceLocation, comptime format: []const u8, args: anytype) void {
+        if (comptime !std.log.logEnabled(level, .monitor))
+            return;
+        var buffer: [4096]u8 = undefined;
+        var body: std.Io.Writer = .fixed(&buffer);
+        body.print(format, args) catch {}; // Truncated
+        const severity: otel.logs.Severity = switch (level) {
+            .err => .err,
+            .warn => .warn,
+            .info => .info,
+            .debug => .debug,
+        };
+        self.logger.emit(severity, body.buffered(), .{ .severity_text = level.asText(), .location = location });
+        std.log.defaultLog(level, .monitor, format, args);
+    }
+};
+
 /// What the gauge reads, on the thread of the metric reader
 const Observed = struct {
     io: std.Io,
+    log: Log,
     timecard: *const tap.Timecard,
     /// Set when a reading fails, to stop
     failed: std.Io.Event = .unset,
@@ -40,7 +61,7 @@ fn observeOffset(context: ObservedContext, gpa: std.mem.Allocator) ObserveResult
     const observed = context.into(Observed).?;
     const timecard = observed.timecard;
     const reading = timecard.ptp_info.readOffset(true) catch |err| {
-        log.err("Unable to read the offset of {s}: {t}", .{ timecard.ptp_info.name, err });
+        observed.log.emit(.err, @src(), "Unable to read the offset of {s}: {t}", .{ timecard.ptp_info.name, err });
         observed.failed.set(observed.io);
         return error.CallbackExecutionFailed;
     };
@@ -53,7 +74,7 @@ fn observeOffset(context: ObservedContext, gpa: std.mem.Allocator) ObserveResult
     return .{ .int = points };
 }
 
-/// Logs go to OpenTelemetry and to stderr, which journald collects
+/// The logs of std.log, from the shared code, go to OpenTelemetry and to stderr, which journald collects
 fn logFn(
     comptime level: std.log.Level,
     comptime scope: @EnumLiteral(),
@@ -61,7 +82,7 @@ fn logFn(
     args: anytype,
 ) void {
     switch (scope) {
-        .monitor, .timecard, .cli => otel.logs.std_log_bridge.logFn(level, scope, format, args),
+        .timecard, .cli => otel.logs.std_log_bridge.logFn(level, scope, format, args),
         // Such as the SDK reporting an unreachable collector: exporting that could loop
         else => std.log.defaultLog(level, scope, format, args),
     }
@@ -144,9 +165,10 @@ pub fn main(init: std.process.Init) !u8 {
     try otel.logs.std_log_bridge.configure(.{
         .provider = logger_provider,
         .scope = .{ .name = build_info.name, .version = build_info.version },
-        .include_source_location = false, // Only available as the location of the bridge itself
+        .include_source_location = false, // Only adds the level, already in the severity: std.log doesn't give the caller's location
     });
     defer otel.logs.std_log_bridge.shutdown();
+    const log: Log = .{ .logger = try logger_provider.getLogger(.{ .name = build_info.name, .version = build_info.version }) };
 
     const meter_provider = try otel.metrics.MeterProvider.init(gpa, io);
     defer meter_provider.deinit();
@@ -155,7 +177,7 @@ pub fn main(init: std.process.Init) !u8 {
 
     const timecard_path = try cli.timecardPath(gpa, options.options);
     defer gpa.free(timecard_path);
-    log.info("Starting {s} version {s}, with timecard at {s}", .{ build_info.name, build_info.version, timecard_path });
+    log.emit(.info, @src(), "Starting {s} version {s}, with timecard at {s}", .{ build_info.name, build_info.version, timecard_path });
     var timecard: tap.Timecard = cli.openTimecard(gpa, io, options.options.root, timecard_path) catch |err| switch (err) {
         error.InvalidOption => return 1,
         else => |e| return e,
@@ -173,7 +195,7 @@ pub fn main(init: std.process.Init) !u8 {
     );
     defer metric_reader.shutdown() catch {};
 
-    var observed: Observed = .{ .io = io, .timecard = &timecard };
+    var observed: Observed = .{ .io = io, .log = log, .timecard = &timecard };
     var callbacks = [_]ObserveMeasures{observeOffset};
     const meter = try meter_provider.getMeter(.{ .name = build_info.name, .version = build_info.version });
     _ = try meter.createObservableGauge(.{
