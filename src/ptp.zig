@@ -26,6 +26,14 @@ pub const pin_function_string = [_][]const u8{ "None", "ExternalTimeStamp", "Per
 
 /// Collect info about the ptp clock
 /// from the sysfs and from IOCTLs
+/// A reading of a PTP clock against the system clock
+pub const Offset = struct {
+    /// Time to add to the system clock to get the time of the PTP clock, in nanoseconds
+    value: i64,
+    /// System time elapsed around the reading of the PTP clock, in nanoseconds: the value is known to within half of it
+    window: i64,
+};
+
 pub const PtpInfo = struct {
     name: []const u8,
     capabilities: linux.struct_ptp_clock_caps,
@@ -84,7 +92,7 @@ pub const PtpInfo = struct {
         self: PtpInfo,
         /// Whether to take the TAI-UTC offset into account
         tai: bool,
-    ) !i64 {
+    ) !Offset {
         var readings: linux.struct_ptp_sys_offset_extended = .{ .n_samples = 1 };
         if (ioctl(self.device.handle, @bitCast(sys_offset_extended), &readings) != 0)
             return error.FailedIoctl;
@@ -94,7 +102,10 @@ pub const PtpInfo = struct {
             return error.NonMonotonicSystemClock;
         }
         const offset: i64 = if (tai) (-37 * std.time.ns_per_s) else 0;
-        return diff(readings.ts[0][1], readings.ts[0][0]) - @divTrunc(sys_window, 2) + offset;
+        return .{
+            .value = diff(readings.ts[0][1], readings.ts[0][0]) - @divTrunc(sys_window, 2) + offset,
+            .window = sys_window,
+        };
     }
 
     pub fn deinit(self: *PtpInfo, gpa: Allocator, io: std.Io) void {

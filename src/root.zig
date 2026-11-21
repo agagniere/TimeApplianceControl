@@ -4,6 +4,7 @@ const parseSerialNumber = @import("serialnumber.zig").parseSerialNumber;
 pub const PciInfo = @import("pci.zig").PciInfo;
 const _ptp = @import("ptp.zig");
 pub const PtpInfo = _ptp.PtpInfo;
+pub const Offset = _ptp.Offset;
 
 const readfile = @import("readfile.zig");
 const readFileFitting = readfile.readFileFitting;

@@ -77,7 +77,7 @@ const Log = struct {
     }
 };
 
-/// What the gauge reads, on the thread of the metric reader
+/// What the gauges read, on the thread of the metric reader
 const Observed = struct {
     io: std.Io,
     log: Log,
@@ -86,20 +86,44 @@ const Observed = struct {
     attributes: []const otel.Attribute,
     /// Set when a reading fails, to stop
     failed: std.Io.Event = .unset,
+    /// Made by the first of the two gauges an export observes, for the other one
+    reading: ?tap.Offset = null,
+
+    /// The two gauges observe the same reading, so that the window bounds the error of the offset exported with it
+    fn read(observed: *Observed) error{CallbackExecutionFailed}!tap.Offset {
+        if (observed.reading) |reading| {
+            observed.reading = null;
+            return reading;
+        }
+        // Reported once
+        if (observed.failed.isSet())
+            return error.CallbackExecutionFailed;
+        const ptp_info = &observed.timecard.ptp_info;
+        const reading = ptp_info.readOffset(true) catch |err| {
+            observed.log.emit(.err, @src(), "Unable to read the offset of {s}: {t}", .{ ptp_info.name, err });
+            observed.failed.set(observed.io);
+            return error.CallbackExecutionFailed;
+        };
+        observed.reading = reading;
+        return reading;
+    }
+
+    fn point(observed: *const Observed, gpa: std.mem.Allocator, value: i64) ObserveResult {
+        const points = try gpa.alloc(DataPoint, 1);
+        errdefer gpa.free(points);
+        points[0] = .{ .value = value, .attributes = try gpa.dupe(otel.Attribute, observed.attributes) };
+        return .{ .int = points };
+    }
 };
 
 fn observeOffset(context: ObservedContext, gpa: std.mem.Allocator) ObserveResult {
     const observed = context.into(Observed).?;
-    const timecard = observed.timecard;
-    const reading = timecard.ptp_info.readOffset(true) catch |err| {
-        observed.log.emit(.err, @src(), "Unable to read the offset of {s}: {t}", .{ timecard.ptp_info.name, err });
-        observed.failed.set(observed.io);
-        return error.CallbackExecutionFailed;
-    };
-    const points = try gpa.alloc(DataPoint, 1);
-    errdefer gpa.free(points);
-    points[0] = .{ .value = reading, .attributes = try gpa.dupe(otel.Attribute, observed.attributes) };
-    return .{ .int = points };
+    return observed.point(gpa, (try observed.read()).value);
+}
+
+fn observeWindow(context: ObservedContext, gpa: std.mem.Allocator) ObserveResult {
+    const observed = context.into(Observed).?;
+    return observed.point(gpa, (try observed.read()).window);
 }
 
 /// The logs of std.log, from the shared code, go to OpenTelemetry and to stderr, which journald collects
@@ -257,13 +281,19 @@ pub fn main(init: std.process.Init) !u8 {
     log.attributes = attributes.items[discovered..];
 
     var observed: Observed = .{ .io = io, .log = log, .timecard = &timecard, .attributes = attributes.items };
-    var callbacks = [_]ObserveMeasures{observeOffset};
+    var offset_callbacks = [_]ObserveMeasures{observeOffset};
+    var window_callbacks = [_]ObserveMeasures{observeWindow};
     const meter = try meter_provider.getMeter(.{ .name = build_info.name, .version = build_info.version });
     _ = try meter.createObservableGauge(.{
         .name = "timecard.ptp.offset",
         .unit = "ns",
         .description = "Time to add to the system clock to get the time of the timecard's PTP clock",
-    }, .from(&observed), &callbacks);
+    }, .from(&observed), &offset_callbacks);
+    _ = try meter.createObservableGauge(.{
+        .name = "timecard.ptp.offset.window",
+        .unit = "ns",
+        .description = "System time elapsed around the reading of the PTP clock: the offset is known to within half of it",
+    }, .from(&observed), &window_callbacks);
 
     try observed.failed.wait(io);
     return error.ReadingFailed;
