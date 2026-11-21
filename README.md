@@ -86,6 +86,17 @@ OpenTelemetry is set up before looking for the timecard, so that the collector a
 # OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 ./zig-out/bin/tap-monitor --ocp-number 1
 ```
 
+Each instance monitors one card. To run one systemd service per card, started and stopped as cards come and go, install the files of `dist/`. They have not been tested on a host yet:
+
+```console
+# cp zig-out/bin/tap-monitor /usr/bin/
+# cp dist/tap-monitor@.service /etc/systemd/system/
+# cp dist/90-tap-monitor.rules /etc/udev/rules.d/
+# echo OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 > /etc/default/tap-monitor
+# systemctl daemon-reload && udevadm control --reload && udevadm trigger --subsystem-match=timecard
+# systemctl status 'tap-monitor@*'
+```
+
 ### Meta Timecard
 
 ```console

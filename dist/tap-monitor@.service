@@ -1,0 +1,15 @@
+# One instance per timecard, named after it (tap-monitor@ocp0) and started by 90-tap-monitor.rules
+[Unit]
+Description=Monitoring of timecard %i
+Documentation=https://github.com/agagniere/TimeApplianceControl
+BindsTo=sys-subsystem-timecard-devices-%i.device
+After=sys-subsystem-timecard-devices-%i.device network-online.target
+Wants=network-online.target
+
+[Service]
+# The OTEL_* variables, such as OTEL_EXPORTER_OTLP_ENDPOINT, shared by the instances
+EnvironmentFile=-/etc/default/tap-monitor
+ExecStart=/usr/bin/tap-monitor --timecard-name %i
+# Its readings fail when the card has a problem: try again later, rather than give up after a few quick failures
+Restart=on-failure
+RestartSec=10s
