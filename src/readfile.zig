@@ -1,5 +1,5 @@
 const std = @import("std");
-const log = @import("log.zig").config.scoped(.timecard);
+const log = std.log.scoped(.timecard);
 const Allocator = std.mem.Allocator;
 
 /// Size of a buffer that always holds a sysfs attribute entirely:
@@ -28,13 +28,13 @@ pub fn readIntegerFromFile(
     var buffer: [max_attribute_size]u8 = undefined;
     const content = readFileFitting(io, dir, filename, &buffer) catch |err| {
         switch (err) {
-            error.FileTooBig => log.errAt(@src(), "The file '{s}' in " ++ location ++ " is larger than expected", .{filename}),
-            else => log.errAt(@src(), location ++ " is expected to contain a file called '{s}': {t}", .{ filename, err }),
+            error.FileTooBig => log.err("The file '{s}' in " ++ location ++ " is larger than expected", .{filename}),
+            else => log.err(location ++ " is expected to contain a file called '{s}': {t}", .{ filename, err }),
         }
         return err;
     };
     return std.fmt.parseInt(T, std.mem.trim(u8, content, "\n"), 0) catch |err| {
-        log.errAt(@src(), "The file '{s}' in " ++ location ++ " is expected to contain an integer: {t}", .{ filename, err });
+        log.err("The file '{s}' in " ++ location ++ " is expected to contain an integer: {t}", .{ filename, err });
         return err;
     };
 }
@@ -58,9 +58,9 @@ pub fn readListFromFile(
     var buffer: [max_attribute_size]u8 = undefined;
     const content = readFileFitting(io, dir, filename, &buffer) catch |err| {
         switch (err) {
-            error.FileTooBig => log.errAt(@src(), "The file '{s}' in " ++ log_options.location ++ " is larger than expected", .{filename}),
+            error.FileTooBig => log.err("The file '{s}' in " ++ log_options.location ++ " is larger than expected", .{filename}),
             else => if (log_options.mandatory)
-                log.errAt(@src(), "A file called '{s}' is expected in " ++ log_options.location ++ ": {t}", .{ filename, err }),
+                log.err("A file called '{s}' is expected in " ++ log_options.location ++ ": {t}", .{ filename, err }),
         }
         return err;
     };

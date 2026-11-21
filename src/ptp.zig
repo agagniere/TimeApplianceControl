@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const Allocator = std.mem.Allocator;
-const log = @import("log.zig").config.scoped(.timecard);
+const log = std.log.scoped(.timecard);
 
 const linux = @import("ptp_clock");
 
@@ -34,7 +34,7 @@ pub const PtpInfo = struct {
 
     pub fn init(alloc: Allocator, io: std.Io, root: std.Io.Dir, timecard_root: std.Io.Dir) !PtpInfo {
         var dir = timecard_root.openDir(io, "ptp", .{}) catch |err| {
-            log.errAt(@src(), "Timecard sysfs expected to have a folder called 'ptp': {t}", .{err});
+            log.err("Timecard sysfs expected to have a folder called 'ptp': {t}", .{err});
             return err;
         };
         defer dir.close(io);
@@ -44,8 +44,8 @@ pub const PtpInfo = struct {
         defer dev.close(io);
         const ptp_device = dev.openFile(io, name, .{}) catch |err| {
             switch (err) {
-                error.AccessDenied, error.PermissionDenied => log.errAt(@src(), "Not allowed to open /dev/{s}: {t}. Reading the PTP clock requires root access, run tapctl with sudo", .{ name, err }),
-                else => log.errAt(@src(), "Error opening /dev/{s}: {t}", .{ name, err }),
+                error.AccessDenied, error.PermissionDenied => log.err("Not allowed to open /dev/{s}: {t}. Reading the PTP clock requires root access, run tapctl with sudo", .{ name, err }),
+                else => log.err("Error opening /dev/{s}: {t}", .{ name, err }),
             }
             return err;
         };
@@ -90,7 +90,7 @@ pub const PtpInfo = struct {
             return error.FailedIoctl;
         const sys_window = diff(readings.ts[0][2], readings.ts[0][0]);
         if (sys_window < 0) {
-            log.errAt(@src(), "Non monotonic system clock, unable to make a reading. This might be due to an invalid ts_window_adjust value, consider setting it to 0", .{});
+            log.err("Non monotonic system clock, unable to make a reading. This might be due to an invalid ts_window_adjust value, consider setting it to 0", .{});
             return error.NonMonotonicSystemClock;
         }
         const offset: i64 = if (tai) (-37 * std.time.ns_per_s) else 0;

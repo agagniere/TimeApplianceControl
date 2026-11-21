@@ -29,12 +29,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .link_libc = true,
         .imports = &.{
-            .{ .name = "axe", .module = axe.module("axe") },
             .{ .name = "ptp_clock", .module = ptp_clock },
         },
     });
 
-    const exe = addExecutable(b, name, target, optimize, mod, argsParser.module("args"), build_info);
+    const exe = addExecutable(b, name, target, optimize, mod, argsParser.module("args"), axe.module("axe"), build_info);
     b.installArtifact(exe);
 
     { // Run
@@ -60,11 +59,10 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .link_libc = true,
             .imports = &.{
-                .{ .name = "axe", .module = axe.module("axe") },
                 .{ .name = "ptp_clock", .module = ptp_clock_stub },
             },
         });
-        const e2e_exe = addExecutable(b, name ++ "-e2e", target, optimize, e2e_mod, argsParser.module("args"), build_info);
+        const e2e_exe = addExecutable(b, name ++ "-e2e", target, optimize, e2e_mod, argsParser.module("args"), axe.module("axe"), build_info);
         const cases = [_]struct { []const u8, E2eCase }{
             .{ "test/fixtures/facebook", .{ .args = &.{ "--ocp-number", "0" } } },
             .{ "test/fixtures/art", .{ .args = &.{ "--ocp-number", "2" } } },
@@ -144,6 +142,7 @@ fn addExecutable(
     optimize: std.lang.Optimize,
     tap: *std.Build.Module,
     args: *std.Build.Module,
+    axe: *std.Build.Module,
     build_info: *std.Build.Step.Options,
 ) *std.Build.Step.Compile {
     const exe = b.addExecutable(.{
@@ -155,6 +154,7 @@ fn addExecutable(
             .imports = &.{
                 .{ .name = "tap", .module = tap },
                 .{ .name = "args", .module = args },
+                .{ .name = "axe", .module = axe },
             },
         }),
         .use_llvm = true, // https://github.com/ziglang/zig/issues/24364

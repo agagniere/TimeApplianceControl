@@ -4,7 +4,6 @@ const parseSerialNumber = @import("serialnumber.zig").parseSerialNumber;
 pub const PciInfo = @import("pci.zig").PciInfo;
 const _ptp = @import("ptp.zig");
 pub const PtpInfo = _ptp.PtpInfo;
-pub const Log = @import("log.zig").config;
 
 const readfile = @import("readfile.zig");
 const readFileFitting = readfile.readFileFitting;
@@ -12,7 +11,7 @@ const max_attribute_size = readfile.max_attribute_size;
 const readListFromFile = readfile.readListFromFile;
 const readIntegerFromFile = readfile.readIntegerFromFile;
 
-const log = Log.scoped(.timecard);
+const log = std.log.scoped(.timecard);
 
 const Allocator = std.mem.Allocator;
 const NameMap = std.array_hash_map.String([]const u8);
@@ -24,7 +23,7 @@ fn getSerialPortsName(alloc: Allocator, io: std.Io, root: std.Io.Dir) !NameMap {
     var tty_dir = root.openDir(io, "tty", .{ .iterate = true }) catch |err| {
         switch (err) {
             error.FileNotFound => {
-                log.errAt(@src(), "This program only supports linux 6.9 and newer, where the driver groups the ttys' read-only attributes in a folder", .{});
+                log.err("This program only supports linux 6.9 and newer, where the driver groups the ttys' read-only attributes in a folder", .{});
             },
             else => {},
         }
@@ -70,7 +69,7 @@ const Connector = struct {
         };
 
         if (comma == null or way == null) {
-            log.errAt(@src(), "Expected attribute '{s}' to be of the form '(IN|OUT): <format>', got instead: '{s}'", .{ filename, content });
+            log.err("Expected attribute '{s}' to be of the form '(IN|OUT): <format>', got instead: '{s}'", .{ filename, content });
             return error.InvalidFormat;
         }
 
@@ -140,7 +139,7 @@ pub const Timecard = struct {
         const name = try arena.dupe(u8, std.Io.Dir.path.basename(path));
 
         var pci_device = dir.openDir(io, "device", .{}) catch |err| {
-            log.errAt(@src(), "Expected a 'device' folder in the sysfs of {s}: {t}", .{ name, err });
+            log.err("Expected a 'device' folder in the sysfs of {s}: {t}", .{ name, err });
             return err;
         };
         defer pci_device.close(io);
@@ -169,7 +168,7 @@ pub const Timecard = struct {
         // The driver prints its u32 with %d, so large values show up negative
         const pci_delay: u32 = @truncate(@as(u64, @bitCast(printed_pci_delay)));
         if (printed_pci_delay < std.math.minInt(u32) or printed_pci_delay > std.math.maxInt(u32)) {
-            log.errAt(@src(), "Timecard {s}'s timestamp window adjustment is {}ns (displayed by the driver as {}), so the system timestamps of PTP readings are off by seconds. This is a known bug of linux 6.12 to 7.2, fixed in 7.3 and backported to 6.12.y, 6.18.y and 7.2.y in October 2026. To fix: sudo bash -c 'echo 0 > {s}/ts_window_adjust'", .{ name, pci_delay, printed_pci_delay, path });
+            log.err("Timecard {s}'s timestamp window adjustment is {}ns (displayed by the driver as {}), so the system timestamps of PTP readings are off by seconds. This is a known bug of linux 6.12 to 7.2, fixed in 7.3 and backported to 6.12.y, 6.18.y and 7.2.y in October 2026. To fix: sudo bash -c 'echo 0 > {s}/ts_window_adjust'", .{ name, pci_delay, printed_pci_delay, path });
         }
 
         // Allocate everything before copying the arena into the result
@@ -179,7 +178,7 @@ pub const Timecard = struct {
             .name = name,
             .path = try arena.dupe(u8, path),
             .serialnumber = readSerialNumber(io, dir) catch |err| blk: {
-                log.errAt(@src(), "Unable to read serial number of {s}: {t}", .{ name, err });
+                log.err("Unable to read serial number of {s}: {t}", .{ name, err });
                 break :blk null;
             },
             .serial_ports_name = try getSerialPortsName(arena, io, dir),
@@ -320,7 +319,6 @@ pub const Timecard = struct {
 };
 
 test {
-    _ = @import("log.zig");
     _ = @import("pci.zig");
     _ = @import("ptp.zig");
     _ = @import("readfile.zig");

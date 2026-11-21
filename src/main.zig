@@ -1,10 +1,24 @@
 const std = @import("std");
 const argsParser = @import("args");
+const axe = @import("axe");
 const tap = @import("tap");
 
 const build_info = @import("build_info");
 
-const log = tap.Log;
+const log = axe.Axe(.{
+    .format = "[%l%s%L] %m\n",
+    .scope_format = " %",
+    .loc_format = " %f:%F:%l",
+    .level_text = .{
+        .debug = "DEBUG",
+        .info = "INFO ",
+        .warn = "WARN ",
+        .err = "ERROR",
+    },
+    .styles = .{
+        .debug = &.{.dim},
+    },
+});
 const Timecard = tap.Timecard;
 
 pub const std_options: std.Options = .{
