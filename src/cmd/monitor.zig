@@ -160,6 +160,9 @@ pub fn main(init: std.process.Init) !u8 {
         return 0;
     }
 
+    const timecard_path = try cli.timecardPath(gpa, options.options);
+    defer gpa.free(timecard_path);
+
     // OpenTelemetry is set up before looking for the timecard, so that the collector also receives startup errors
     if (init.environ_map.get("OTEL_METRIC_EXPORT_INTERVAL") == null)
         try init.environ_map.put("OTEL_METRIC_EXPORT_INTERVAL", default_export_interval_ms);
@@ -175,7 +178,9 @@ pub fn main(init: std.process.Init) !u8 {
     defer log_exporter.deinit();
     const log_processor = try otel.logs.BatchingLogRecordProcessor.init(gpa, io, log_exporter.asLogRecordExporter(), .{});
     defer log_processor.deinit();
-    const logger_provider = try otel.logs.LoggerProvider.init(gpa, io, null);
+    // Each instance monitors one card: its name, known from the options, also identifies the logs of the library
+    const resource = [_]otel.Attribute{.{ .key = "timecard.name", .value = .{ .string = std.Io.Dir.path.basename(timecard_path) } }};
+    const logger_provider = try otel.logs.LoggerProvider.init(gpa, io, &resource);
     defer logger_provider.deinit();
     try logger_provider.addLogRecordProcessor(log_processor.asLogRecordProcessor());
     defer logger_provider.shutdown() catch {}; // Flushes the logs
@@ -195,8 +200,6 @@ pub fn main(init: std.process.Init) !u8 {
     var unread_exporter: ?*otel.metrics.MetricExporter = metric_exporter.exporter;
     defer if (unread_exporter) |exporter| exporter.shutdown();
 
-    const timecard_path = try cli.timecardPath(gpa, options.options);
-    defer gpa.free(timecard_path);
     log.emit(.info, @src(), "Starting {s} version {s}, with timecard at {s}", .{ build_info.name, build_info.version, timecard_path });
     var timecard: tap.Timecard = cli.openTimecard(gpa, io, options.options.root, timecard_path) catch |err| switch (err) {
         error.InvalidOption => return 1,
