@@ -259,10 +259,31 @@ pub fn main(init: std.process.Init) !u8 {
         .unit = "ns",
         .description = "System time elapsed around the reading of the PTP clock: the offset is known to within half of it",
     });
+    // Only for the cards that expose them
+    const gnss_sync = if (timecard.gnss_sync != null) try meter.createGauge(i64, .{
+        .name = "timecard.gnss.sync",
+        .unit = "1",
+        .description = "1 while the timecard receives a valid GNSS signal, 0 once it is lost",
+    }) else null;
+    const ClockStatus = struct { offset: *otel.metrics.Histogram(i64), drift: *otel.metrics.Histogram(i64) };
+    const clock_status: ?ClockStatus = if (timecard.clock_status != null) .{
+        .offset = try meter.createHistogram(i64, .{
+            .name = "timecard.clock_status.offset",
+            .unit = "ns",
+            .description = "Last phase correction applied by the firmware of the timecard to discipline its clock",
+        }),
+        .drift = try meter.createHistogram(i64, .{
+            .name = "timecard.clock_status.drift",
+            .unit = "ns/s",
+            .description = "Frequency correction applied by the firmware of the timecard to discipline its clock",
+        }),
+    } else null;
 
     const interval: std.Io.Duration = .fromMilliseconds(options.options.interval);
     var samples_buffer: [tap.PtpInfo.max_samples]tap.Offset = undefined;
     const samples = samples_buffer[0..options.options.samples];
+    // To log the changes
+    var previous_gnss_sync: ?tap.GnssSync = null;
     while (true) {
         timecard.ptp_info.readOffsets(true, samples) catch |err| {
             log.emit(.err, @src(), "Unable to read the offset of {s}: {t}", .{ timecard.ptp_info.name, err });
@@ -271,6 +292,26 @@ pub fn main(init: std.process.Init) !u8 {
         for (samples) |sample| {
             try offset.recordWithSlice(sample.value, attributes.items);
             try window.recordWithSlice(sample.window, attributes.items);
+        }
+        if (gnss_sync) |gauge| {
+            const current = timecard.readGnssSync() catch |err| {
+                log.emit(.err, @src(), "Unable to read the GNSS status of {s}: {t}", .{ timecard.name, err });
+                return error.ReadingFailed;
+            };
+            if (previous_gnss_sync == null or !std.meta.eql(current, previous_gnss_sync.?)) switch (current) {
+                .synchronized => log.emit(.info, @src(), "{s} receives a valid GNSS signal", .{timecard.name}),
+                .lost => |time| log.emit(.warn, @src(), "{s} lost its GNSS signal at {s} UTC", .{ timecard.name, &time }),
+            };
+            previous_gnss_sync = current;
+            try gauge.recordWithSlice(@intFromBool(current == .synchronized), attributes.items);
+        }
+        if (clock_status) |histograms| {
+            const current = timecard.readClockStatus() catch |err| {
+                log.emit(.err, @src(), "Unable to read the clock status of {s}: {t}", .{ timecard.name, err });
+                return error.ReadingFailed;
+            };
+            try histograms.offset.recordWithSlice(current.offset, attributes.items);
+            try histograms.drift.recordWithSlice(current.drift, attributes.items);
         }
         try io.sleep(interval, .awake);
     }
