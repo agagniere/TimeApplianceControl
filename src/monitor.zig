@@ -174,6 +174,9 @@ pub fn main(init: std.process.Init) !u8 {
     defer meter_provider.deinit();
     const metric_exporter = try otel.metrics.MetricExporter.OTLP(gpa, io, null, null, otlp_config);
     defer metric_exporter.otlp.deinit();
+    // Until the reader is created, which then shuts the exporter down
+    var unread_exporter: ?*otel.metrics.MetricExporter = metric_exporter.exporter;
+    defer if (unread_exporter) |exporter| exporter.shutdown();
 
     const timecard_path = try cli.timecardPath(gpa, options.options);
     defer gpa.free(timecard_path);
@@ -193,6 +196,7 @@ pub fn main(init: std.process.Init) !u8 {
         config.metrics_config.export_interval_ms,
         config.metrics_config.export_timeout_ms,
     );
+    unread_exporter = null;
     defer metric_reader.shutdown() catch {};
 
     var observed: Observed = .{ .io = io, .log = log, .timecard = &timecard };
