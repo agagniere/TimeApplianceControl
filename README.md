@@ -14,6 +14,10 @@ A command line interface for timecards of Open Compute's Time Appliance Project
 
 ## Usage
 
+Two executables share the same options to select the timecard:
+- `tapctl` for one-off actions, logging to stderr in a readable format
+- `tap-monitor`, a long-running process meant for a systemd service, reporting metrics and logs with OpenTelemetry
+
 ```console
 $ zig build run
 Usage: tapctl [-N NUMBER | -n NAME | -P PATH] [-r ROOT] [-h] [-v] COMMAND
@@ -22,8 +26,33 @@ Control a time card from Open Compute Project's Time Appliance Project
 
 Commands:
   info     Dump all info collected about the time card as a single JSON object to standard output
-  monitor  Collect metrics from the clock and possibly the oscillator, pushed to statsd
   mro      Interact with an mRO50
+
+Monitoring is done by tap-monitor
+
+Options:
+  -N, --ocp-number      Specify the number of the appliance. Its sysfs is
+                        then assumed to be at /sys/class/timecard/ocp<N>.
+                        Defaults to 0
+  -n, --timecard-name   Specify the name of the appliance. Its sysfs is then
+                        assumed to be at /sys/class/timecard/<NAME>.
+                        Overrides --ocp-number
+  -P, --timecard-path   Specify the absolute path of the appliance's sysfs.
+                        Overrides --timecard-name and --ocp-number
+  -r, --root            Resolve all absolute paths (sysfs and /dev) relative
+                        to this directory, like chroot. Defaults to /
+  -h, --help            Display this usage message on standard output and
+                        exit successfully
+  -v, --version         Show version information on standard output and
+                        exit successfully
+```
+
+```console
+$ zig build run-monitor -- --help
+Usage: tap-monitor [-N NUMBER | -n NAME | -P PATH] [-r ROOT] [-h] [-v]
+
+Report the offset between the PTP clock of a time card and the system clock every 10 seconds, with OpenTelemetry.
+Configure the export with the standard environment variables, such as OTEL_EXPORTER_OTLP_ENDPOINT and OTEL_SERVICE_NAME
 
 Options:
   -N, --ocp-number      Specify the number of the appliance. Its sysfs is
@@ -48,20 +77,12 @@ Note: Super user privilege is required to access `/dev/ptp<N>`
 
 ### Monitor clock offset
 
-A measurement is done every 10 seconds
+A measurement is done every 10 seconds, and reported as the gauge `timecard.ptp.offset`, in nanoseconds, with the attributes `timecard.name` and `ptp.clock.name`.
+Logs are exported too, and also written to stderr for journald.
+OpenTelemetry is set up before looking for the timecard, so that the collector also receives startup errors.
 
 ```console
-# ./zig-out/bin/tapctl monitor --ocp-number 1
-[INFO ] Starting tapctl version 0.0.1, with timecard at /sys/class/timecard/ocp1
-[DEBUG timecard] Card ocp1 is part of the PCI device /sys/devices/pci0000:00/0000:00:01.1/0000:02:00.0
-[INFO  timecard] Card ocp1 detected as Orolia ART Card rev. 6, PCI x4
-[INFO  timecard] Card ocp1 exposes PTP clock ptp2
-[INFO ] Will send statsd metrics to 127.0.0.1:8125
-[DEBUG] ptp2: 23ns
-[DEBUG] ptp2: 3ns
-[DEBUG] ptp2: 21ns
-[DEBUG] ptp2: 30ns
-[DEBUG] ptp2: 13ns
+# OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 OTEL_SERVICE_NAME=tap-monitor ./zig-out/bin/tap-monitor --ocp-number 1
 ```
 
 ### Meta Timecard

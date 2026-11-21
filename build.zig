@@ -8,9 +8,8 @@ pub fn build(b: *std.Build) void {
 
     const argsParser = b.dependency("args", .{ .target = target, .optimize = optimize });
     const axe = b.dependency("axe", .{ .target = target, .optimize = optimize });
-    const build_info = b.addOptions();
-    build_info.addOption([]const u8, "version", zon.version);
-    build_info.addOption([]const u8, "name", name);
+    // Its build only offers to choose between Debug and its preferred release mode
+    const opentelemetry = b.dependency("opentelemetry", .{ .target = target, .release = optimize != .debug });
 
     const ptp_clock_stub = b.createModule(.{
         .root_source_file = b.path("test/port.zig"),
@@ -33,15 +32,33 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    const exe = addExecutable(b, name, target, optimize, mod, argsParser.module("args"), axe.module("axe"), build_info);
+    // One-off actions, with readable logs
+    const tapctl: Program = .{ .name = name, .root_source_file = "src/main.zig", .imports = &.{
+        .{ .name = "args", .module = argsParser.module("args") },
+        .{ .name = "axe", .module = axe.module("axe") },
+    } };
+    // Long-running, reporting with OpenTelemetry
+    const monitor: Program = .{ .name = "tap-monitor", .root_source_file = "src/monitor.zig", .imports = &.{
+        .{ .name = "args", .module = argsParser.module("args") },
+        .{ .name = "opentelemetry", .module = opentelemetry.module("sdk") },
+    } };
+    const exe = addExecutable(b, tapctl.name, tapctl, target, optimize, mod);
     b.installArtifact(exe);
+    const monitor_exe = addExecutable(b, monitor.name, monitor, target, optimize, mod);
+    b.installArtifact(monitor_exe);
 
     { // Run
-        const run_step = b.step("run", "Run the app");
+        const run_step = b.step("run", "Run tapctl");
         const run_cmd = b.addRunArtifact(exe);
         run_step.dependOn(&run_cmd.step);
         run_cmd.step.dependOn(b.getInstallStep());
         run_cmd.addPassthruArgs();
+
+        const run_monitor_step = b.step("run-monitor", "Run tap-monitor");
+        const run_monitor_cmd = b.addRunArtifact(monitor_exe);
+        run_monitor_step.dependOn(&run_monitor_cmd.step);
+        run_monitor_cmd.step.dependOn(b.getInstallStep());
+        run_monitor_cmd.addPassthruArgs();
     }
     { // Test
         const test_step = b.step("test", "Run tests");
@@ -62,7 +79,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "ptp_clock", .module = ptp_clock_stub },
             },
         });
-        const e2e_exe = addExecutable(b, name ++ "-e2e", target, optimize, e2e_mod, argsParser.module("args"), axe.module("axe"), build_info);
+        const e2e_exe = addExecutable(b, name ++ "-e2e", tapctl, target, optimize, e2e_mod);
         const cases = [_]struct { []const u8, E2eCase }{
             .{ "test/fixtures/facebook", .{ .args = &.{ "--ocp-number", "0" } } },
             .{ "test/fixtures/art", .{ .args = &.{ "--ocp-number", "2" } } },
@@ -135,30 +152,41 @@ fn isRoot() bool {
     };
 }
 
+/// An executable of this package, built on the `tap` library
+const Program = struct {
+    name: []const u8,
+    root_source_file: []const u8,
+    imports: []const std.Build.Module.Import,
+};
+
 fn addExecutable(
     b: *std.Build,
     exe_name: []const u8,
+    program: Program,
     target: std.Build.ResolvedTarget,
     optimize: std.lang.Optimize,
     tap: *std.Build.Module,
-    args: *std.Build.Module,
-    axe: *std.Build.Module,
-    build_info: *std.Build.Step.Options,
 ) *std.Build.Step.Compile {
-    const exe = b.addExecutable(.{
+    const build_info = b.addOptions();
+    build_info.addOption([]const u8, "version", zon.version);
+    build_info.addOption([]const u8, "name", program.name);
+    const root_module = b.createModule(.{
+        .root_source_file = b.path(program.root_source_file),
+        .target = target,
+        .optimize = optimize,
+        .imports = program.imports,
+    });
+    root_module.addImport("tap", tap);
+    root_module.addImport("cli", b.createModule(.{
+        .root_source_file = b.path("src/cli.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "tap", .module = tap }},
+    }));
+    root_module.addOptions("build_info", build_info);
+    return b.addExecutable(.{
         .name = exe_name,
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "tap", .module = tap },
-                .{ .name = "args", .module = args },
-                .{ .name = "axe", .module = axe },
-            },
-        }),
+        .root_module = root_module,
         .use_llvm = true, // https://github.com/ziglang/zig/issues/24364
     });
-    exe.root_module.addOptions("build_info", build_info);
-    return exe;
 }

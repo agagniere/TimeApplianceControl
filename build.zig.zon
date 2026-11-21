@@ -13,6 +13,10 @@
             .url = "git+https://github.com/Ratakor/axe?ref=0.9.0#09773445415fa8fb0c8ebfc55e6d31de8d64c834",
             .hash = "axe-0.9.0-M2JU5R6RAAA-iU1v8YHw3dSB8XMmnltmDT1aQJCTqlgp",
         },
+        .opentelemetry = .{
+            .url = "git+https://github.com/open-telemetry/opentelemetry-zig?ref=main#682d2ecb9ffa0432d0851affc10f802ee9287c08",
+            .hash = "opentelemetry-0.0.1-U_uKJ5yaKwC1tcuszq7-Bu8-eOZkKXj3EZuaoR1mq8G_",
+        },
     },
     .paths = .{
         "build.zig",

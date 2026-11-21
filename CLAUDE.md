@@ -4,16 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`tapctl`: a Zig CLI for timecards from Open Compute's Time Appliance Project (Facebook/Meta Timecard, Celestica, Orolia ART Card, Adva). It reads the Linux `ptp_ocp` driver's sysfs (`/sys/class/timecard/ocp<N>`) and the matching `/dev/ptp<N>` character device.
+Two Zig executables for timecards from Open Compute's Time Appliance Project (Facebook/Meta Timecard, Celestica, Orolia ART Card, Adva): `tapctl`, a CLI for one-off actions, and `tap-monitor`, a long-running process meant for a systemd service, reporting with OpenTelemetry. They read the Linux `ptp_ocp` driver's sysfs (`/sys/class/timecard/ocp<N>`) and the matching `/dev/ptp<N>` character device.
 
 ## Commands
 
 The project targets Zig **0.17.0** (`build.zig.zon` `minimum_zig_version`). Dependencies are fetched into a project-local `zig-pkg/` folder, which is gitignored. To update one, run `zig fetch --save=<name> "git+https://...#<commit-or-tag>"`.
 
 ```sh
-zig build                         # builds zig-out/bin/tapctl (Debug)
+zig build                         # builds zig-out/bin/tapctl and zig-out/bin/tap-monitor (Debug)
 zig build --release               # ReleaseSafe (preferred_optimize_mode)
-zig build run -- info -N 1        # run with args
+zig build run -- info -N 1        # run tapctl with args
+zig build run-monitor -- -N 1     # run tap-monitor with args
 zig build test                    # unit tests of the `tap` library module (src/root.zig), then e2e
 zig build e2e                     # end-to-end: `tapctl --root <fake root> info` on test/fixtures and test/failures
 zig build docs                    # emits docs to zig-out/docs
@@ -26,7 +27,9 @@ The program only works on Linux with a real timecard present. It needs Linux ≥
 
 ## Architecture
 
-- **`src/main.zig`**: the CLI only. `main` takes a `std.process.Init` and passes `init.io` down to everything that touches the filesystem or network. It parses arguments with `zig-args` (`parseWithVerbForCurrentProcess`). The verbs are the `Verbs` union: `info`, `monitor`, and `mro` (a stub). Help text is built from each options struct's `meta`. To add a verb, add an options struct, a `Verbs` field, a line in `CommonOptions.meta.full_text`, and a branch in the help and dispatch `switch`es. `monitor` reads the PTP offset every 10s and sends it to statsd over UDP as the gauge `<ptpN>.offset`. It resolves the address with `std.Io.net.HostName.lookup` and uses the first address that a `.dgram` connect succeeds on.
+- **`src/main.zig`**: `tapctl`, the CLI only. `main` takes a `std.process.Init` and passes `init.io` down to everything that touches the filesystem or network. It parses arguments with `zig-args` (`parseWithVerbForCurrentProcess`). The verbs are the `Verbs` union: `info` and `mro` (a stub), one-off actions. Help text is built from each options struct's `meta`. To add a verb, add an options struct, a `Verbs` field, a line in `CommonOptions.meta.full_text`, and a branch in the help and dispatch `switch`es.
+- **`src/monitor.zig`**: `tap-monitor`. It reads the PTP offset every 10s and records it as the OpenTelemetry gauge `timecard.ptp.offset`, exported over OTLP with its logs. The SDK (open-telemetry/opentelemetry-zig) is configured from the standard `OTEL_*` environment variables, and set up before looking for the timecard so that startup errors reach the collector too. Its `logFn` exports only the scopes of this repository (`.monitor`, `.timecard`, `.cli`) and writes everything to stderr: the SDK logs its own failures with other scopes, and exporting those could loop.
+- **`src/cli.zig`**: the `cli` module, shared by both executables to turn the card selection options into an opened `Timecard`. Their options structs declare the same fields (`ocp-number`, `timecard-name`, `timecard-path`, `root`), since `zig-args` structs can't be composed. `build.zig` gives each executable its own `build_info` (name and version), through `addExecutable` and a `Program` description.
 - **`src/root.zig`**: the `tap` library module, which the exe imports as `tap`. `Timecard.fromPath` collects everything from sysfs into one struct. All paths are opened relative to a root `Dir` (`--root`, `/` by default), and `/dev` is reached the same way in `ptp.zig`, so never use `openDirAbsolute`. `Timecard.to_json` builds a `std.json.Value` by hand, using an arena. The JSON shape is the output contract of `tapctl info` (see the README examples). Any new field must be added both to the struct (filled in `fromPath`) and to `to_json`. `Timecard` stores the `Io` it was created with, because `deinit` needs it to close the PTP device. `std.json.ObjectMap` is unmanaged, so `put` takes the arena.
 - **`src/ptp.zig`**: talks to `/dev/ptpN` with raw `ioctl`s (`PTP_CLOCK_GETCAPS`, `PTP_PIN_GETFUNC`, `PTP_SYS_OFFSET_EXTENDED`). The header is translated by the build system (`addTranslateC` in `build.zig`, since 0.17 has no `@cImport`) and imported as the `ptp_clock` module. The ioctl request constants are `@truncate`d to `u32` for `std.c.ioctl`. `readOffset` subtracts a hard-coded 37s TAI-UTC offset. On non-Linux targets, `build.zig` uses `test/port.zig` as that module instead. It's a hand-written, test-only stand-in with the same struct layouts, so any new declaration used from `ptp_clock` must also be added there. It also fakes the ioctls (`ptp.zig` picks `linux.ioctl` when the module declares one) by parsing the PTP device as a ZON file. The e2e executable always uses this stand-in, even on Linux.
 - **`src/pci.zig`**: maps PCI vendor and device IDs to enums. Their `@tagName`s are the display strings, hence names like `@"ART Card"`.
