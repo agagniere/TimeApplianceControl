@@ -17,6 +17,21 @@ pub const std_options: std.Options = .{
 /// Unless OTEL_METRIC_EXPORT_INTERVAL is set: the specification's default of 60s is too long for a clock
 const default_export_interval_ms = "10000";
 
+/// Whether the service is named by OTEL_SERVICE_NAME or OTEL_RESOURCE_ATTRIBUTES, read like the SDK does.
+/// Otherwise the SDK would fall back to unknown_service:tap-monitor.
+/// It has no way to give a default instead: https://github.com/open-telemetry/opentelemetry-zig/issues/194
+fn isServiceNamed(environ_map: *const std.process.Environ.Map) bool {
+    if (environ_map.get("OTEL_SERVICE_NAME") != null)
+        return true;
+    var entries = std.mem.tokenizeScalar(u8, environ_map.get("OTEL_RESOURCE_ATTRIBUTES") orelse return false, ',');
+    while (entries.next()) |entry| {
+        const separator = std.mem.indexOfScalar(u8, entry, '=') orelse continue;
+        if (std.mem.eql(u8, std.mem.trim(u8, entry[0..separator], &std.ascii.whitespace), "service.name"))
+            return true;
+    }
+    return false;
+}
+
 // The SDK does not export the types of a meter and of its observable instruments: they are the ones of its functions
 const Meter = @typeInfo(@typeInfo(@TypeOf(otel.metrics.MeterProvider.getMeter)).@"fn".return_type.?).error_union.payload;
 const create_observable_gauge = @typeInfo(@TypeOf(@typeInfo(Meter).pointer.child.createObservableGauge)).@"fn";
@@ -109,7 +124,7 @@ const Options = struct {
         .usage_summary = "[-N NUMBER | -n NAME | -P PATH] [-r ROOT] [-h] [-v]",
         .full_text =
         \\Report the offset between the PTP clock of a time card and the system clock with OpenTelemetry, at each export of the metrics.
-        \\Configure the export with the standard environment variables, such as OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME, and OTEL_METRIC_EXPORT_INTERVAL (10000 ms by default)
+        \\Configure the export with the standard environment variables, such as OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME (tap-monitor by default), and OTEL_METRIC_EXPORT_INTERVAL (10000 ms by default)
         ,
         .option_docs = .{
             .@"ocp-number" = "Specify the number of the appliance. Its sysfs is then assumed to be at /sys/class/timecard/ocp<N>. Defaults to 0",
@@ -148,6 +163,8 @@ pub fn main(init: std.process.Init) !u8 {
     // OpenTelemetry is set up before looking for the timecard, so that the collector also receives startup errors
     if (init.environ_map.get("OTEL_METRIC_EXPORT_INTERVAL") == null)
         try init.environ_map.put("OTEL_METRIC_EXPORT_INTERVAL", default_export_interval_ms);
+    if (!isServiceNamed(init.environ_map))
+        try init.environ_map.put("OTEL_SERVICE_NAME", build_info.name);
     const config = try otel.config.Configuration.init(gpa, io, init.environ_map);
     defer config.deinit();
     otel.config.Configuration.set(config);

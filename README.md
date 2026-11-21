@@ -52,7 +52,7 @@ $ zig build run-monitor -- --help
 Usage: tap-monitor [-N NUMBER | -n NAME | -P PATH] [-r ROOT] [-h] [-v]
 
 Report the offset between the PTP clock of a time card and the system clock with OpenTelemetry, at each export of the metrics.
-Configure the export with the standard environment variables, such as OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME, and OTEL_METRIC_EXPORT_INTERVAL (10000 ms by default)
+Configure the export with the standard environment variables, such as OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME (tap-monitor by default), and OTEL_METRIC_EXPORT_INTERVAL (10000 ms by default)
 
 Options:
   -N, --ocp-number      Specify the number of the appliance. Its sysfs is
@@ -79,10 +79,11 @@ Note: Super user privilege is required to access `/dev/ptp<N>`
 
 The offset is read at each export of the metrics, every 10 seconds unless `OTEL_METRIC_EXPORT_INTERVAL` says otherwise, and reported as the observable gauge `timecard.ptp.offset`, in nanoseconds, with the attributes `timecard.name` and `ptp.clock.name`.
 Logs are exported too, and also written to stderr for journald.
+The service is named `tap-monitor` unless `OTEL_SERVICE_NAME` or `service.name` in `OTEL_RESOURCE_ATTRIBUTES` says otherwise.
 OpenTelemetry is set up before looking for the timecard, so that the collector also receives startup errors.
 
 ```console
-# OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 OTEL_SERVICE_NAME=tap-monitor ./zig-out/bin/tap-monitor --ocp-number 1
+# OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 ./zig-out/bin/tap-monitor --ocp-number 1
 ```
 
 ### Meta Timecard
