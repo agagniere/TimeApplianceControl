@@ -68,6 +68,8 @@ const Observed = struct {
     io: std.Io,
     log: Log,
     timecard: *const tap.Timecard,
+    /// Of every data point, which each own a copy of the slice
+    attributes: []const otel.Attribute,
     /// Set when a reading fails, to stop
     failed: std.Io.Event = .unset,
 };
@@ -82,10 +84,7 @@ fn observeOffset(context: ObservedContext, gpa: std.mem.Allocator) ObserveResult
     };
     const points = try gpa.alloc(DataPoint, 1);
     errdefer gpa.free(points);
-    points[0] = try DataPoint.new(gpa, reading, .{
-        "timecard.name",  timecard.name,
-        "ptp.clock.name", timecard.ptp_info.name,
-    });
+    points[0] = .{ .value = reading, .attributes = try gpa.dupe(otel.Attribute, observed.attributes) };
     return .{ .int = points };
 }
 
@@ -219,7 +218,20 @@ pub fn main(init: std.process.Init) !u8 {
     unread_exporter = null;
     defer metric_reader.shutdown() catch {};
 
-    var observed: Observed = .{ .io = io, .log = log, .timecard = &timecard };
+    // The names of the card and of its clock follow the probe order, so they can change when cards are added or moved
+    var attributes_buffer: [5]otel.Attribute = undefined;
+    var attributes: std.ArrayList(otel.Attribute) = .initBuffer(&attributes_buffer);
+    attributes.appendAssumeCapacity(.{ .key = "timecard.name", .value = .{ .string = timecard.name } });
+    attributes.appendAssumeCapacity(.{ .key = "ptp.clock.name", .value = .{ .string = timecard.ptp_info.name } });
+    var serial_number_buffer: [std.fmt.count("{}", .{std.math.maxInt(u32)})]u8 = undefined;
+    if (timecard.serialnumber) |serial_number|
+        attributes.appendAssumeCapacity(.{ .key = "hw.serial_number", .value = .{ .string = std.fmt.bufPrint(&serial_number_buffer, "{}", .{serial_number}) catch unreachable } });
+    if (timecard.pci_info.vendor) |vendor|
+        attributes.appendAssumeCapacity(.{ .key = "hw.vendor", .value = .{ .string = @tagName(vendor) } });
+    if (timecard.pci_info.device) |device|
+        attributes.appendAssumeCapacity(.{ .key = "hw.model", .value = .{ .string = @tagName(device) } });
+
+    var observed: Observed = .{ .io = io, .log = log, .timecard = &timecard, .attributes = attributes.items };
     var callbacks = [_]ObserveMeasures{observeOffset};
     const meter = try meter_provider.getMeter(.{ .name = build_info.name, .version = build_info.version });
     _ = try meter.createObservableGauge(.{

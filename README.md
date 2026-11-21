@@ -77,7 +77,7 @@ Note: Super user privilege is required to access `/dev/ptp<N>`
 
 ### Monitor clock offset
 
-The offset is read at each export of the metrics, every 10 seconds unless `OTEL_METRIC_EXPORT_INTERVAL` says otherwise, and reported as the observable gauge `timecard.ptp.offset`, in nanoseconds, with the attributes `timecard.name` and `ptp.clock.name`.
+The offset is read at each export of the metrics, every 10 seconds unless `OTEL_METRIC_EXPORT_INTERVAL` says otherwise, and reported as the observable gauge `timecard.ptp.offset`, in nanoseconds, with the attributes `timecard.name` and `ptp.clock.name`, and when known `hw.serial_number`, `hw.vendor` and `hw.model` from OpenTelemetry's hardware conventions. Prefer the serial number to identify a card: the names follow the order in which cards are probed.
 Logs are exported too, with the attribute `timecard.name`, and also written to stderr for journald.
 The service is named `tap-monitor` unless `OTEL_SERVICE_NAME` or `service.name` in `OTEL_RESOURCE_ATTRIBUTES` says otherwise.
 OpenTelemetry is set up before looking for the timecard, so that the collector also receives startup errors.
