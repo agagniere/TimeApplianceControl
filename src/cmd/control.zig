@@ -2,7 +2,7 @@ const std = @import("std");
 const argsParser = @import("args");
 const axe = @import("axe");
 const tap = @import("tap");
-const cli = @import("cli");
+const cli = @import("cli.zig");
 
 const build_info = @import("build_info");
 

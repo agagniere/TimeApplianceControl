@@ -5,7 +5,7 @@ const std = @import("std");
 const argsParser = @import("args");
 const otel = @import("opentelemetry");
 const tap = @import("tap");
-const cli = @import("cli");
+const cli = @import("cli.zig");
 
 const build_info = @import("build_info");
 

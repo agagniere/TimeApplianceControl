@@ -188,12 +188,6 @@ fn addExecutable(
         .imports = program.imports,
     });
     root_module.addImport("tap", tap);
-    root_module.addImport("cli", b.createModule(.{
-        .root_source_file = b.path("src/cli.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{.{ .name = "tap", .module = tap }},
-    }));
     root_module.addOptions("build_info", build_info);
     return b.addExecutable(.{
         .name = exe_name,
