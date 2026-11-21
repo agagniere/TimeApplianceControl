@@ -57,6 +57,8 @@ const attribute = struct {
 /// Like the bridge's, they are written to stderr too
 const Log = struct {
     logger: *otel.logs.Logger,
+    /// What was discovered about the card, once it is
+    attributes: []const otel.Attribute = &.{},
 
     fn emit(self: Log, comptime level: std.log.Level, location: std.builtin.SourceLocation, comptime format: []const u8, args: anytype) void {
         if (comptime !std.log.logEnabled(level, .monitor))
@@ -70,7 +72,7 @@ const Log = struct {
             .info => .info,
             .debug => .debug,
         };
-        self.logger.emit(severity, body.buffered(), .{ .severity_text = level.asText(), .location = location });
+        self.logger.emit(severity, body.buffered(), .{ .severity_text = level.asText(), .location = location, .attributes = self.attributes });
         std.log.defaultLog(level, .monitor, format, args);
     }
 };
@@ -204,7 +206,7 @@ pub fn main(init: std.process.Init) !u8 {
         .include_source_location = false, // Only adds the level, already in the severity: std.log doesn't give the caller's location
     });
     defer otel.logs.std_log_bridge.shutdown();
-    const log: Log = .{ .logger = try logger_provider.getLogger(.{ .name = build_info.name, .version = build_info.version }) };
+    var log: Log = .{ .logger = try logger_provider.getLogger(.{ .name = build_info.name, .version = build_info.version }) };
 
     const meter_provider = try otel.metrics.MeterProvider.init(gpa, io);
     defer meter_provider.deinit();
@@ -239,8 +241,10 @@ pub fn main(init: std.process.Init) !u8 {
     attributes.appendSliceAssumeCapacity(&otel.attributes.fromPairs(.{
         .{ attribute.timecard_name, timecard.name },
         .{ attribute.timecard_path, timecard.path },
-        .{ attribute.ptp_clock_name, timecard.ptp_info.name },
     }));
+    // The logs get only what was discovered, since their resource has the attributes above
+    const discovered = attributes.items.len;
+    attributes.appendSliceAssumeCapacity(&otel.attributes.fromPairs(.{.{ attribute.ptp_clock_name, timecard.ptp_info.name }}));
     // Left out when unknown
     var serial_number_buffer: [std.fmt.count("{}", .{std.math.maxInt(u32)})]u8 = undefined;
     if (timecard.serialnumber) |serial_number|
@@ -249,6 +253,8 @@ pub fn main(init: std.process.Init) !u8 {
         attributes.appendSliceAssumeCapacity(&otel.attributes.fromPairs(.{.{ attribute.hw_vendor, @tagName(vendor) }}));
     if (timecard.pci_info.device) |device|
         attributes.appendSliceAssumeCapacity(&otel.attributes.fromPairs(.{.{ attribute.hw_model, @tagName(device) }}));
+
+    log.attributes = attributes.items[discovered..];
 
     var observed: Observed = .{ .io = io, .log = log, .timecard = &timecard, .attributes = attributes.items };
     var callbacks = [_]ObserveMeasures{observeOffset};
