@@ -127,8 +127,13 @@ pub const Timecard = struct {
     available_output_formats: [][]const u8,
     pci_delay_compensation: u32,
 
-    /// `root` is the directory absolute paths are resolved from, `/` outside of tests
+    /// `root` is the directory absolute paths are resolved from, `/` outside of tests.
+    /// `path` must be absolute, and fails with `error.RelativePath` after logging why otherwise
     pub fn fromPath(gpa: Allocator, io: std.Io, root: std.Io.Dir, path: []const u8) !Timecard {
+        if (!std.Io.Dir.path.isAbsolute(path)) {
+            log.err("The path of a timecard's sysfs must be absolute, unlike '{s}'", .{path});
+            return error.RelativePath;
+        }
         var arena_state: std.heap.ArenaAllocator = .init(gpa);
         errdefer arena_state.deinit();
         const arena = arena_state.allocator();

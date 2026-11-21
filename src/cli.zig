@@ -17,14 +17,13 @@ pub fn timecardPath(gpa: std.mem.Allocator, options: anytype) ![]const u8 {
 
 /// Fails with `error.InvalidOption` after logging why, when the options can't be used
 pub fn openTimecard(gpa: std.mem.Allocator, io: std.Io, root_path: []const u8, timecard_path: []const u8) !tap.Timecard {
-    if (!std.Io.Dir.path.isAbsolute(timecard_path)) {
-        log.err("Timecard's sysfs path required to be absolute. Provided path: '{s}'", .{timecard_path});
-        return error.InvalidOption;
-    }
     var root = std.Io.Dir.cwd().openDir(io, root_path, .{}) catch |err| {
         log.err("Unable to open root directory '{s}': {t}", .{ root_path, err });
         return error.InvalidOption;
     };
     defer root.close(io);
-    return .fromPath(gpa, io, root, timecard_path);
+    return tap.Timecard.fromPath(gpa, io, root, timecard_path) catch |err| switch (err) {
+        error.RelativePath => error.InvalidOption,
+        else => err,
+    };
 }
