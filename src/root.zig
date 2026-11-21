@@ -5,6 +5,9 @@ pub const PciInfo = @import("pci.zig").PciInfo;
 const _ptp = @import("ptp.zig");
 pub const PtpInfo = _ptp.PtpInfo;
 pub const Offset = _ptp.Offset;
+const status = @import("status.zig");
+pub const GnssSync = status.GnssSync;
+pub const ClockStatus = status.ClockStatus;
 
 const readfile = @import("readfile.zig");
 const readFileFitting = readfile.readFileFitting;
@@ -115,6 +118,8 @@ pub const Timecard = struct {
     /// Owns all the memory of the fields, freed at once
     arena: std.heap.ArenaAllocator,
     io: std.Io,
+    /// The sysfs of the card, kept open to read again the attributes that change
+    dir: std.Io.Dir,
     name: []const u8,
     path: []const u8,
     serialnumber: ?u32,
@@ -127,6 +132,10 @@ pub const Timecard = struct {
     available_input_formats: [][]const u8,
     available_output_formats: [][]const u8,
     pci_delay_compensation: u32,
+    /// As read by `fromPath`, see `readGnssSync`
+    gnss_sync: ?GnssSync,
+    /// As read by `fromPath`, see `readClockStatus`
+    clock_status: ?ClockStatus,
 
     /// `root` is the directory absolute paths are resolved from, `/` outside of tests.
     /// `path` must be absolute, and fails with `error.RelativePath` after logging why otherwise
@@ -146,7 +155,7 @@ pub const Timecard = struct {
             }
             return err;
         };
-        defer dir.close(io);
+        errdefer dir.close(io);
 
         const name = try arena.dupe(u8, std.Io.Dir.path.basename(path));
 
@@ -187,6 +196,7 @@ pub const Timecard = struct {
         var result: Timecard = .{
             .arena = undefined,
             .io = io,
+            .dir = dir,
             .name = name,
             .path = try arena.dupe(u8, path),
             .serialnumber = readSerialNumber(io, dir) catch |err| blk: {
@@ -202,6 +212,8 @@ pub const Timecard = struct {
             .available_input_formats = try readListFromFile(arena, io, dir, "available_sma_inputs", .{ .location = "timecard's sysfs" }),
             .available_output_formats = try readListFromFile(arena, io, dir, "available_sma_outputs", .{ .location = "timecard's sysfs" }),
             .pci_delay_compensation = pci_delay,
+            .gnss_sync = GnssSync.read(io, dir) catch null,
+            .clock_status = ClockStatus.read(io, dir) catch null,
         };
         result.arena = arena_state;
         return result;
@@ -209,7 +221,18 @@ pub const Timecard = struct {
 
     pub fn deinit(self: *Timecard) void {
         self.ptp_info.close(self.io);
+        self.dir.close(self.io);
         self.arena.deinit();
+    }
+
+    /// Fails with `error.FileNotFound` without logging when the card doesn't expose it, that is when `gnss_sync` is null
+    pub fn readGnssSync(self: Timecard) !GnssSync {
+        return .read(self.io, self.dir);
+    }
+
+    /// Fails with `error.FileNotFound` without logging when the card doesn't expose it, that is when `clock_status` is null
+    pub fn readClockStatus(self: Timecard) !ClockStatus {
+        return .read(self.io, self.dir);
     }
 
     pub fn to_json(self: Timecard, arena: Allocator) !std.json.Value {
@@ -225,6 +248,31 @@ pub const Timecard = struct {
             if (self.clock_source) |source|
                 try card.put(arena, "clock_source", .{ .string = source });
             try card.put(arena, "timestamp_window_adjustment", .{ .integer = self.pci_delay_compensation });
+            if (self.gnss_sync) |gnss_sync| {
+                var gnss: std.json.ObjectMap = .empty;
+                try gnss.put(arena, "synchronized", .{ .bool = gnss_sync == .synchronized });
+                switch (gnss_sync) {
+                    .synchronized => {},
+                    .lost => |time| try gnss.put(arena, "lost_at", .{ .string = try arena.dupe(u8, &time) }),
+                }
+                try card.put(arena, "gnss", .{ .object = gnss });
+            }
+            if (self.clock_status) |clock_status| {
+                var status_object: std.json.ObjectMap = .empty;
+                {
+                    var offset: std.json.ObjectMap = .empty;
+                    try offset.put(arena, "value", .{ .integer = clock_status.offset });
+                    try offset.put(arena, "unit", .{ .string = try arena.dupe(u8, "ns") });
+                    try status_object.put(arena, "offset", .{ .object = offset });
+                }
+                {
+                    var drift: std.json.ObjectMap = .empty;
+                    try drift.put(arena, "value", .{ .integer = clock_status.drift });
+                    try drift.put(arena, "unit", .{ .string = try arena.dupe(u8, "ns/s") });
+                    try status_object.put(arena, "drift", .{ .object = drift });
+                }
+                try card.put(arena, "clock_status", .{ .object = status_object });
+            }
             {
                 var smas: std.json.Array = .init(arena);
                 for (self.ios) |io| {
@@ -335,4 +383,5 @@ test {
     _ = @import("ptp.zig");
     _ = @import("readfile.zig");
     _ = @import("serialnumber.zig");
+    _ = @import("status.zig");
 }
